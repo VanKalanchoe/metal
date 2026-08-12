@@ -62,5 +62,7 @@ VertexOut vertexMain(uint vertexId : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VertexOut input) : SV_Target
 {
+#if __SLANG_TARGET_METAL__
     return bindlessTextures.textures[input.materialIndex].Sample(diffuseSampler, input.texCoord);
+#endif
 }

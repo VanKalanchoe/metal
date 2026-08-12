@@ -473,9 +473,10 @@ fragment float4 fragmentMain(
         NS::String::string(
             std::string(msl.begin(), msl.end()).c_str(),
             UTF8StringEncoding
-        );printf("\n================ SLANG GENERATED MSL ================\n");
-    printf("%.*s", static_cast<int>(msl.size()), msl.data());
-    printf("\n================ END SLANG MSL ======================\n\n");
+        );
+    //printf("\n================ SLANG GENERATED MSL ================\n");
+    //printf("%.*s", static_cast<int>(msl.size()), msl.data());
+    //printf("\n================ END SLANG MSL ======================\n\n");
 
     MTL::Library* library =
         m_Device->newLibrary(

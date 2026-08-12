@@ -42,6 +42,13 @@ namespace NRI
             "../shaders",
             "../../shaders"
         };
+        
+        // Define preprocessor macros to pass into the Slang session
+                std::array<slang::PreprocessorMacroDesc, 1> macros =
+                {
+                    { "__SLANG_TARGET_METAL__", "1" }
+                };
+        
         /*NOX_CORE_INFO("Slang current working directory: {}", std::filesystem::current_path().string());
         NOX_CORE_INFO("Slang search paths being checked:");
         for (const char* path : searchPaths)
@@ -59,6 +66,8 @@ namespace NRI
             .defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
             .searchPaths = searchPaths.data(),
             .searchPathCount = SlangInt(searchPaths.size()),
+            .preprocessorMacroCount = static_cast<SlangInt>(macros.size()),
+            .preprocessorMacros = macros.data()
         };
         m_globalSession->createSession(slangSessionDesc, session.writeRef());
         
