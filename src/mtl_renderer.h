@@ -52,6 +52,10 @@ public:
     void buildMeshArguments();
     void buildIndirectBuffer();
 
+    void updateQuadInstances(uint32_t frameIndex);
+    void updateIndirectBuffer(uint32_t frameIndex);
+    void updateMeshArguments(uint32_t frameIndex);
+    void updateFrameData(uint32_t frameIndex);
     void updateViewportSize(
         uint32_t width,
         uint32_t height
@@ -70,7 +74,8 @@ private:
     );
 
     void setRenderPassArguments(
-        MTL4::RenderCommandEncoder* encoder
+        MTL4::RenderCommandEncoder* encoder,
+        uint32_t frameindex
     );
 
     void submitCommandBuffer(
@@ -125,7 +130,8 @@ private:
 
     static_assert(sizeof(MeshArguments) == 80);
 
-    MTL::Buffer* m_MeshArguments = nullptr;
+    std::vector<MTL::Buffer*> m_MeshArguments;
+    std::vector<void*> m_MeshArgumentsMapped;
 
 
     // ========================================================
@@ -149,8 +155,13 @@ private:
     // Quads
     // ========================================================
 
-    MTL::Buffer* m_QuadInstanceBuffer = nullptr;
-    MTL::Buffer* m_IndirectBuffer = nullptr;
+    
+
+    std::vector<MTL::Buffer*> m_QuadInstanceBuffers;
+    std::vector<void*> m_QuadInstanceBuffersMapped;
+
+    std::vector<MTL::Buffer*> m_IndirectBuffers;
+    std::vector<void*> m_IndirectBuffersMapped;
     uint32_t m_QuadInstanceCount = 0;
     struct DrawMeshTasksIndirectCommand
     {

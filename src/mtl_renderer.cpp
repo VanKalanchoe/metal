@@ -221,14 +221,6 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
     // Residency
     // --------------------------------------------------------
 
-    if (m_MeshArguments)
-    {
-        m_ResidencySet->addAllocation(
-            m_MeshArguments
-        );
-    }
-
-
     for (MTL::Texture* texture : m_Textures)
     {
         if (texture)
@@ -255,18 +247,18 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
         );
     }
     
-    if (m_QuadInstanceBuffer)
+    for (uint32_t frame = 0;
+         frame < kMaxFramesInFlight;
+         ++frame)
     {
-        m_ResidencySet->addAllocation(
-            m_QuadInstanceBuffer
-        );
-    }
-    
-    if (m_IndirectBuffer)
-    {
-        m_ResidencySet->addAllocation(
-            m_IndirectBuffer
-        );
+        if (m_MeshArguments[frame])
+            m_ResidencySet->addAllocation(m_MeshArguments[frame]);
+
+        if (m_QuadInstanceBuffers[frame])
+            m_ResidencySet->addAllocation(m_QuadInstanceBuffers[frame]);
+
+        if (m_IndirectBuffers[frame])
+            m_ResidencySet->addAllocation(m_IndirectBuffers[frame]);
     }
 
     m_ResidencySet->commit();
@@ -346,18 +338,6 @@ MTLRenderer::~MTLRenderer()
         m_BindlessTextureEncoder = nullptr;
     }
 
-    if (m_QuadInstanceBuffer)
-    {
-        m_QuadInstanceBuffer->release();
-        m_QuadInstanceBuffer = nullptr;
-    }
-    
-    if (m_IndirectBuffer)
-    {
-        m_IndirectBuffer->release();
-        m_IndirectBuffer = nullptr;
-    }
-
     // --------------------------------------------------------
     // Bindless buffer
     // --------------------------------------------------------
@@ -405,15 +385,19 @@ MTLRenderer::~MTLRenderer()
         m_TextureHeap = nullptr;
     }
 
-
-    // --------------------------------------------------------
-    // Mesh arguments
-    // --------------------------------------------------------
-
-    if (m_MeshArguments)
+    
+    for (uint32_t frame = 0;
+         frame < kMaxFramesInFlight;
+         ++frame)
     {
-        m_MeshArguments->release();
-        m_MeshArguments = nullptr;
+        if (m_MeshArguments[frame])
+            m_MeshArguments[frame]->release();
+
+        if (m_QuadInstanceBuffers[frame])
+            m_QuadInstanceBuffers[frame]->release();
+
+        if (m_IndirectBuffers[frame])
+            m_IndirectBuffers[frame]->release();
     }
 
 
@@ -1090,6 +1074,7 @@ void MTLRenderer::buildTextureHeap()
 // Texture
 // ============================================================
 
+
 void MTLRenderer::buildTexture()
 {
     int width = 0;
@@ -1602,123 +1587,93 @@ void MTLRenderer::buildQuadInstances(uint32_t count)
 {
     m_QuadInstanceCount = count;
 
-    m_QuadInstanceBuffer =
-        m_Device->newBuffer(
-            sizeof(QuadInstance) * count,
-            MTL::ResourceStorageModeShared
-        );
+    m_QuadInstanceBuffers.resize(kMaxFramesInFlight);
+    m_QuadInstanceBuffersMapped.resize(kMaxFramesInFlight);
 
-    if (!m_QuadInstanceBuffer)
+    for (uint32_t frame = 0;
+         frame < kMaxFramesInFlight;
+         ++frame)
     {
-        SDL_Log("Failed to create quad instance buffer");
-        return;
-    }
-
-    auto* instances =
-        reinterpret_cast<QuadInstance*>(
-            m_QuadInstanceBuffer->contents()
-        );
-
-    glm::mat4 identity(1.0f);
-
-    // These are in WORLD space.
-    const glm::vec3 positions[4] =
-    {
-        {-1.0f, -1.0f, 0.0f},
-        { 1.0f, -1.0f, 0.0f},
-        {-1.0f,  1.0f, 0.0f},
-        { 1.0f,  1.0f, 0.0f}
-    };
-
-    for (uint32_t i = 0; i < 4; ++i)
-    {
-        instances[i].modelMatrix =
-            glm::translate(
-                identity,
-                positions[i]
+        m_QuadInstanceBuffers[frame] =
+            m_Device->newBuffer(
+                sizeof(QuadInstance) * count,
+                MTL::ResourceStorageModeShared
             );
 
-        instances[i].color =
-            glm::vec4(
-                i == 0 ? 1.0f : 0.2f,
-                i == 1 ? 1.0f : 0.2f,
-                i == 2 ? 1.0f : 0.2f,
-                1.0f
+        if (!m_QuadInstanceBuffers[frame])
+        {
+            SDL_Log(
+                "Failed to create quad instance buffer %u",
+                frame
             );
+
+            return;
+        }
+
+        m_QuadInstanceBuffersMapped[frame] =
+            m_QuadInstanceBuffers[frame]->contents();
     }
 }
+
 void MTLRenderer::buildMeshArguments()
 {
-    m_MeshArguments =
-        m_Device->newBuffer(
-            sizeof(MeshArguments),
-            MTL::ResourceStorageModeShared
-        );
+    m_MeshArguments.resize(kMaxFramesInFlight);
+    m_MeshArgumentsMapped.resize(kMaxFramesInFlight);
 
-    if (!m_MeshArguments)
+    for (uint32_t frame = 0;
+         frame < kMaxFramesInFlight;
+         ++frame)
     {
-        SDL_Log("Failed to create mesh arguments buffer");
-        return;
-    }
-
-    auto* args =
-        reinterpret_cast<MeshArguments*>(
-            m_MeshArguments->contents()
-        );
-
-    const glm::mat4 view =
-            glm::translate(
-                glm::mat4(1.0f),
-                glm::vec3(0.0f, 0.0f, -5.0f)
+        m_MeshArguments[frame] =
+            m_Device->newBuffer(
+                sizeof(MeshArguments),
+                MTL::ResourceStorageModeShared
             );
 
+        if (!m_MeshArguments[frame])
+        {
+            SDL_Log(
+                "Failed to create mesh arguments buffer %u",
+                frame
+            );
 
-    const float aspect =
-        static_cast<float>(m_ViewportSize.x) /
-        static_cast<float>(m_ViewportSize.y);
+            return;
+        }
 
-    const glm::mat4 projection =
-        glm::perspective(
-            glm::radians(60.0f),
-            aspect,
-            0.1f,
-            100.0f
-        );
-
-    args->viewProjection =
-        projection * view;
-
-    args->instanceReference =
-        m_QuadInstanceBuffer->gpuAddress();
+        m_MeshArgumentsMapped[frame] =
+            m_MeshArguments[frame]->contents();
+    }
 }
+
 void MTLRenderer::buildIndirectBuffer()
 {
-    DrawMeshTasksIndirectCommand command
-    {
-        m_QuadInstanceCount,
-        1,
-        1
-    };
+    m_IndirectBuffers.resize(kMaxFramesInFlight);
+    m_IndirectBuffersMapped.resize(kMaxFramesInFlight);
 
-    m_IndirectBuffer =
-        m_Device->newBuffer(
-            sizeof(DrawMeshTasksIndirectCommand),
-            MTL::ResourceStorageModeShared
-        );
-
-    if (!m_IndirectBuffer)
+    for (uint32_t frame = 0;
+         frame < kMaxFramesInFlight;
+         ++frame)
     {
-        SDL_Log("Failed to create indirect buffer");
-        return;
+        m_IndirectBuffers[frame] =
+            m_Device->newBuffer(
+                sizeof(DrawMeshTasksIndirectCommand),
+                MTL::ResourceStorageModeShared
+            );
+
+        if (!m_IndirectBuffers[frame])
+        {
+            SDL_Log(
+                "Failed to create indirect buffer %u",
+                frame
+            );
+
+            return;
+        }
+
+        m_IndirectBuffersMapped[frame] =
+            m_IndirectBuffers[frame]->contents();
     }
-
-    memcpy(
-        m_IndirectBuffer->contents(),
-        &command,
-        sizeof(command)
-    );
 }
-
 // ============================================================
 // Viewport
 // ============================================================
@@ -1731,19 +1686,14 @@ void MTLRenderer::updateViewportSize(
     m_ViewportSize =
         simd_make_uint2(width, height);
 
-    if (!m_MeshArguments || height == 0)
+    if (height == 0)
         return;
-
-    auto* args =
-        reinterpret_cast<MeshArguments*>(
-            m_MeshArguments->contents()
-        );
 
     const float aspect =
         static_cast<float>(width) /
         static_cast<float>(height);
 
-    const glm::mat4 projection =
+    m_Projection =
         glm::perspective(
             glm::radians(60.0f),
             aspect,
@@ -1751,14 +1701,11 @@ void MTLRenderer::updateViewportSize(
             100.0f
         );
 
-    const glm::mat4 view =
+    m_View =
         glm::translate(
             glm::mat4(1.0f),
             glm::vec3(0.0f, 0.0f, -5.0f)
         );
-
-    args->viewProjection =
-        projection * view;
 }
 
 // ============================================================
@@ -1836,13 +1783,94 @@ void MTLRenderer::setViewport(
     );
 }
 
+void MTLRenderer::updateFrameData(uint32_t frameIndex)
+{
+    // ========================================================
+    // Mesh arguments
+    // ========================================================
 
+    MeshArguments meshArgs{};
+
+    meshArgs.viewProjection =
+        m_Projection * m_View;
+
+    meshArgs.instanceReference =
+        m_QuadInstanceBuffers[frameIndex]->gpuAddress();
+
+    memcpy(
+        m_MeshArgumentsMapped[frameIndex],
+        &meshArgs,
+        sizeof(meshArgs)
+    );
+
+
+    // ========================================================
+    // Indirect command
+    // ========================================================
+
+    DrawMeshTasksIndirectCommand indirectCommand{};
+
+    indirectCommand.groupCountX =
+        m_QuadInstanceCount;
+
+    indirectCommand.groupCountY = 1;
+    indirectCommand.groupCountZ = 1;
+
+    memcpy(
+        m_IndirectBuffersMapped[frameIndex],
+        &indirectCommand,
+        sizeof(indirectCommand)
+    );
+
+
+    // ========================================================
+    // Instance data
+    // ========================================================
+
+    QuadInstance instances[4]{};
+
+    const glm::vec3 positions[4] =
+    {
+        {-1.0f, -1.0f, 0.0f},
+        { 1.0f, -1.0f, 0.0f},
+        {-1.0f,  1.0f, 0.0f},
+        { 1.0f,  1.0f, 0.0f}
+    };
+
+    const glm::mat4 identity(1.0f);
+
+    for (uint32_t i = 0;
+         i < m_QuadInstanceCount;
+         ++i)
+    {
+        instances[i].modelMatrix =
+            glm::translate(
+                identity,
+                positions[i]
+            );
+
+        instances[i].color =
+            glm::vec4(
+                i == 0 ? 1.0f : 0.2f,
+                i == 1 ? 1.0f : 0.2f,
+                i == 2 ? 1.0f : 0.2f,
+                1.0f
+            );
+    }
+
+    memcpy(
+        m_QuadInstanceBuffersMapped[frameIndex],
+        instances,
+        sizeof(QuadInstance) * m_QuadInstanceCount
+    );
+}
 // ============================================================
 // Render arguments
 // ============================================================
 
 void MTLRenderer::setRenderPassArguments(
-    MTL4::RenderCommandEncoder* encoder
+    MTL4::RenderCommandEncoder* encoder,
+    uint32_t frameIndex
 )
 {
     m_ArgumentTable->setAddress(
@@ -1851,7 +1879,7 @@ void MTLRenderer::setRenderPassArguments(
     );
 
     m_ArgumentTable->setAddress(
-        m_MeshArguments->gpuAddress(),
+        m_MeshArguments[frameIndex]->gpuAddress(),
         1
     );
 
@@ -1970,7 +1998,8 @@ void MTLRenderer::draw()
             return;
         }
     }
-
+    
+    updateFrameData(frameIndex);
 
     // --------------------------------------------------------
     // Command allocator
@@ -2102,7 +2131,8 @@ void MTLRenderer::draw()
     // --------------------------------------------------------
 
     setRenderPassArguments(
-        encoder
+        encoder,
+        frameIndex
     );
 
 
@@ -2124,7 +2154,7 @@ void MTLRenderer::draw()
     // --------------------------------------------------------
 
     encoder->drawMeshThreadgroups(
-        m_IndirectBuffer->gpuAddress(),
+        m_IndirectBuffers[frameIndex]->gpuAddress(),
         MTL::Size::Make(1, 1, 1),
         MTL::Size::Make(32, 1, 1)
     );
