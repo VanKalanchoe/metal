@@ -4,7 +4,7 @@ layout: user-guide
 
 # Target-Specific Features
 
-Slang can produce code for a variety of targets. When producing code for a target, Slang attempts to translate HLSL intrinsics to the closest functionality provided by the target. In addition, Slang also supports target-specific intrinsics and language extensions that allow users to make best use of the target. This chapter documents all the important target-specific behaviors.
+Slang can produce code for a variety of targets. When producing code for a target, Slang attempts to translate HLSL intrinsics to the closest functionality provided by the target. In addition, Slang also supports target-specific intrinsics and language extensions that allow users to make the best use of the target. This chapter documents all the important target-specific behaviors.
 
 In this chapter:
 
@@ -21,5 +21,6 @@ In this chapter:
 SPIR-V target specific <a2-01-spirv-target-specific>
 Metal target specific <a2-02-metal-target-specific>
 WGSL target specific <a2-03-wgsl-target-specific>
+GLSL target specific <a2-04-glsl-target-specific>
 ```
 RTD-TOC-END -->

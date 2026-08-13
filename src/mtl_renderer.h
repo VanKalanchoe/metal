@@ -17,7 +17,7 @@
 namespace NRI
 {
 
-struct QuadInstance
+struct alignas(16) QuadInstance
 {
     glm::mat4 modelMatrix;
     glm::vec4 color;
@@ -41,8 +41,11 @@ public:
     void buildShaders();
 
     void buildTextureHeap();
-    void buildTexture();
-    void uploadTexture();
+    uint32_t buildTexture(const char* path);
+    bool uploadTexture(
+        uint32_t textureIndex,
+        MTL::Buffer* stagingBuffer
+    );
 
     void buildBindlessTextureBuffer();
     void buildSampler();
@@ -124,8 +127,6 @@ private:
     {
         glm::mat4 viewProjection;
         uint64_t instanceReference;
-        uint32_t padding0;
-        uint32_t padding1;
     };
 
     static_assert(sizeof(MeshArguments) == 80);
@@ -138,7 +139,7 @@ private:
     // Bindless textures
     // ========================================================
 
-    static constexpr uint32_t kMaxBindlessTextures = 10000;
+    static constexpr uint32_t kMaxBindlessTextures = 64;
 
     std::vector<MTL::Texture*> m_Textures;
 

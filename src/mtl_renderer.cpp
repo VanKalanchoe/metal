@@ -35,7 +35,9 @@ struct ScopedAutoreleasePool
 // ============================================================
 // Constructor
 // ============================================================
-
+uint32_t m_ChernoTexture = UINT32_MAX;
+uint32_t m_CheckerboardTexture = UINT32_MAX;
+uint32_t m_Image1Texture = UINT32_MAX;
 MTLRenderer::MTLRenderer(SDL_Window& window)
     : _angle(0.0f),
       _lastFrameTime(SDL_GetPerformanceCounter()),
@@ -135,18 +137,86 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
         return;
     }
 
+
     // --------------------------------------------------------
-    // Resources
+    // Command allocators
     // --------------------------------------------------------
 
     buildCommandAllocators();
 
+
+    // --------------------------------------------------------
+    // Texture heap
+    // --------------------------------------------------------
+
     buildTextureHeap();
 
-    buildTexture();
+
+    // --------------------------------------------------------
+    // Residency set
+    //
+    // IMPORTANT:
+    // Create ONE residency set and keep using it.
+    // --------------------------------------------------------
+
+    buildResidencySet();
+
+    if (!m_ResidencySet)
+    {
+        SDL_Log(
+            "Failed to create residency set"
+        );
+
+        return;
+    }
+
+    // Make the residency set available to the command queue
+    // BEFORE any texture upload happens.
+    m_CommandQueue->addResidencySet(
+        m_ResidencySet
+    );
+
+
+    // --------------------------------------------------------
+    // Sampler
+    // --------------------------------------------------------
 
     buildSampler();
-    
+
+    m_ChernoTexture =
+        buildTexture("../../textures/ChernoLogo.png");
+
+    if (m_ChernoTexture == UINT32_MAX)
+        return;
+
+    m_CheckerboardTexture =
+        buildTexture("../../textures/Checkerboard.png");
+
+    if (m_CheckerboardTexture == UINT32_MAX)
+        return;
+
+    m_Image1Texture =
+        buildTexture("../../textures/image1.jpg");
+
+    if (m_Image1Texture == UINT32_MAX)
+        return;
+   
+
+    // At this point:
+    //
+    // m_ChernoTexture      = 0
+    // m_CheckerboardTexture = 1
+    // m_Image1Texture      = 2
+    //
+    // m_Textures[0] = ChernoLogo.png
+    // m_Textures[1] = Checkerboard.png
+    // m_Textures[2] = image1.jpg
+
+
+    // --------------------------------------------------------
+    // Window size
+    // --------------------------------------------------------
+
     int width = 0;
     int height = 0;
 
@@ -162,31 +232,39 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
             static_cast<uint32_t>(height)
         );
 
-    //buildBuffers();
+
+    // --------------------------------------------------------
+    // Per-frame buffers
+    // --------------------------------------------------------
+
     constexpr uint32_t quadCount = 4;
 
     buildQuadInstances(quadCount);
     buildMeshArguments();
     buildIndirectBuffer();
+
+
     // --------------------------------------------------------
-    // Shader + pipeline
+    // Shaders + pipeline
     // --------------------------------------------------------
 
     buildShaders();
-    //buildIndirectBuffer();
-
-    
 
 
     // --------------------------------------------------------
-    // Bindless resources
+    // Bindless texture buffer
+    //
+    // All 3 textures already exist and are uploaded here.
     // --------------------------------------------------------
 
     buildBindlessTextureBuffer();
 
-    buildArgumentTable();
 
-    buildResidencySet();
+    // --------------------------------------------------------
+    // Argument table
+    // --------------------------------------------------------
+
+    buildArgumentTable();
 
 
     // --------------------------------------------------------
@@ -217,28 +295,12 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
     );
 
 
-    // --------------------------------------------------------
-    // Residency
-    // --------------------------------------------------------
-
-    for (MTL::Texture* texture : m_Textures)
-    {
-        if (texture)
-        {
-            m_ResidencySet->addAllocation(
-                texture
-            );
-        }
-    }
-
-
-    if (m_TextureStagingBuffer)
-    {
-        m_ResidencySet->addAllocation(
-            m_TextureStagingBuffer
-        );
-    }
-
+    // ========================================================
+    // FINAL RESIDENCY
+    //
+    // Textures were already added above.
+    // Now add the resources used during rendering.
+    // ========================================================
 
     if (m_BindlessTextureBuffer)
     {
@@ -246,28 +308,42 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
             m_BindlessTextureBuffer
         );
     }
-    
+
+
     for (uint32_t frame = 0;
          frame < kMaxFramesInFlight;
          ++frame)
     {
         if (m_MeshArguments[frame])
-            m_ResidencySet->addAllocation(m_MeshArguments[frame]);
+        {
+            m_ResidencySet->addAllocation(
+                m_MeshArguments[frame]
+            );
+        }
 
         if (m_QuadInstanceBuffers[frame])
-            m_ResidencySet->addAllocation(m_QuadInstanceBuffers[frame]);
+        {
+            m_ResidencySet->addAllocation(
+                m_QuadInstanceBuffers[frame]
+            );
+        }
 
         if (m_IndirectBuffers[frame])
-            m_ResidencySet->addAllocation(m_IndirectBuffers[frame]);
+        {
+            m_ResidencySet->addAllocation(
+                m_IndirectBuffers[frame]
+            );
+        }
     }
 
+
+    // Commit all resources needed for normal rendering.
     m_ResidencySet->commit();
 
 
-    m_CommandQueue->addResidencySet(
-        m_ResidencySet
-    );
-
+    // --------------------------------------------------------
+    // SDL layer residency
+    // --------------------------------------------------------
 
     if (m_layer->residencySet())
     {
@@ -275,13 +351,6 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
             m_layer->residencySet()
         );
     }
-
-
-    // --------------------------------------------------------
-    // Upload texture
-    // --------------------------------------------------------
-
-    uploadTexture();
 
 
     // --------------------------------------------------------
@@ -1073,158 +1142,156 @@ void MTLRenderer::buildTextureHeap()
 // ============================================================
 // Texture
 // ============================================================
-
-
-void MTLRenderer::buildTexture()
+uint32_t MTLRenderer::buildTexture(const char* path)
 {
     int width = 0;
     int height = 0;
     int channels = 0;
 
-
     stbi_uc* pixels =
         stbi_load(
-            "../../textures/ChernoLogo.png",
+            path,
             &width,
             &height,
             &channels,
             STBI_rgb_alpha
         );
 
-
     if (!pixels)
     {
         SDL_Log(
-            "Failed to load texture: %s",
+            "Failed to load texture %s: %s",
+            path,
             stbi_failure_reason()
         );
 
-        return;
+        return UINT32_MAX;
     }
 
-
-    const size_t bytesPerPixel = 4;
-
-
     const size_t bytesPerRow =
-        static_cast<size_t>(width) *
-        bytesPerPixel;
+        static_cast<size_t>(width) * 4;
 
-
-    const size_t textureSize =
+    const size_t imageSize =
         bytesPerRow *
         static_cast<size_t>(height);
 
-
-    // --------------------------------------------------------
-    // Staging buffer
-    // --------------------------------------------------------
-
-    m_TextureStagingBuffer =
-        m_Device->newBuffer(
-            textureSize,
-            MTL::ResourceStorageModeShared
-        );
-
-
-    if (!m_TextureStagingBuffer)
-    {
-        SDL_Log(
-            "Failed to create texture staging buffer"
-        );
-
-
-        stbi_image_free(pixels);
-
-        return;
-    }
-
-
-    memcpy(
-        m_TextureStagingBuffer->contents(),
-        pixels,
-        textureSize
+    SDL_Log(
+        "Loading %s: %dx%d channels=%d row=%zu image=%zu",
+        path,
+        width,
+        height,
+        channels,
+        bytesPerRow,
+        imageSize
     );
 
-
-    stbi_image_free(pixels);
-
-
-    // --------------------------------------------------------
-    // Private texture
-    // --------------------------------------------------------
-
-    MTL::TextureDescriptor*
-        descriptor =
-            MTL::TextureDescriptor
-                ::alloc()
-                ->init();
-
+    MTL::TextureDescriptor* descriptor =
+        MTL::TextureDescriptor::alloc()->init();
 
     descriptor->setTextureType(
         MTL::TextureType::TextureType2D
     );
 
-
     descriptor->setPixelFormat(
         MTL::PixelFormat::PixelFormatRGBA8Unorm_sRGB
     );
 
+    descriptor->setWidth(width);
+    descriptor->setHeight(height);
 
-    descriptor->setWidth(
-        width
-    );
-
-
-    descriptor->setHeight(
-        height
-    );
-
-
-    descriptor->setMipmapLevelCount(
-        1
-    );
-
+    descriptor->setMipmapLevelCount(1);
 
     descriptor->setUsage(
         MTL::TextureUsageShaderRead
     );
 
-
     descriptor->setStorageMode(
         MTL::StorageMode::StorageModePrivate
     );
 
-
     MTL::Texture* texture =
-        m_TextureHeap->newTexture(
-            descriptor
-        );
-
+        m_Device->newTexture(descriptor);
 
     descriptor->release();
 
-
     if (!texture)
     {
+        stbi_image_free(pixels);
+
         SDL_Log(
-            "Failed to create texture from heap"
+            "Failed to create texture %s",
+            path
         );
 
-
-        m_TextureStagingBuffer->release();
-
-        m_TextureStagingBuffer = nullptr;
-
-        return;
+        return UINT32_MAX;
     }
 
+    MTL::Buffer* staging =
+        m_Device->newBuffer(
+            imageSize,
+            MTL::ResourceStorageModeShared
+        );
 
-    m_Textures.push_back(
+    if (!staging)
+    {
+        texture->release();
+        stbi_image_free(pixels);
+
+        return UINT32_MAX;
+    }
+
+    memcpy(
+        staging->contents(),
+        pixels,
+        imageSize
+    );
+
+    stbi_image_free(pixels);
+
+    const uint32_t index =
+        static_cast<uint32_t>(
+            m_Textures.size()
+        );
+
+    m_Textures.push_back(texture);
+
+    m_ResidencySet->addAllocation(
         texture
     );
-}
 
+    m_ResidencySet->addAllocation(
+        staging
+    );
+
+    m_ResidencySet->commit();
+
+    if (!uploadTexture(index, staging))
+    {
+        staging->release();
+        texture->release();
+
+        m_Textures.pop_back();
+
+        return UINT32_MAX;
+    }
+
+    // Safe now because uploadTexture() waited
+    // for the committed GPU work to finish.
+    staging->release();
+
+    SDL_Log(
+        "Texture %u created: %s %dx%d resourceID=%llu",
+        index,
+        path,
+        width,
+        height,
+        static_cast<unsigned long long>(
+            texture->gpuResourceID()._impl
+        )
+    );
+
+    return index;
+}
 
 // ============================================================
 // Bindless texture argument buffer
@@ -1232,77 +1299,36 @@ void MTLRenderer::buildTexture()
 
 void MTLRenderer::buildBindlessTextureBuffer()
 {
-    if (m_Textures.empty())
-    {
-        SDL_Log(
-            "No textures available for bindless texture buffer"
-        );
-
-        return;
-    }
-
-
     MTL::Function* fragmentFunction =
-    m_FragmentLibrary->newFunction(
+        m_FragmentLibrary->newFunction(
             NS::String::string(
                 "fragmentMain",
                 NS::StringEncoding::UTF8StringEncoding
             )
         );
 
-
     if (!fragmentFunction)
-    {
-        SDL_Log(
-            "Failed to get fragmentMain"
-        );
-
         return;
-    }
-
 
     MTL::ArgumentEncoder* encoder =
-        fragmentFunction->newArgumentEncoder(
-            0
-        );
-
+        fragmentFunction->newArgumentEncoder(0);
 
     fragmentFunction->release();
 
-
     if (!encoder)
-    {
-        SDL_Log(
-            "Failed to create bindless argument encoder"
-        );
-
         return;
-    }
 
+    /*
+        IMPORTANT:
 
-    const NS::UInteger elementStride =
-        encoder->encodedLength();
+        encodedLength() is the size of ONE
+        TextureContainer argument-buffer record.
 
-
-    if (elementStride == 0)
-    {
-        SDL_Log(
-            "Argument encoder returned zero stride"
-        );
-
-
-        encoder->release();
-
-        return;
-    }
-
-
+        Since we have ONE TextureContainer,
+        we allocate ONE record.
+    */
     const NS::UInteger bufferSize =
-        elementStride *
-        static_cast<NS::UInteger>(
-            m_Textures.size()
-        );
-
+        encoder->encodedLength();
 
     m_BindlessTextureBuffer =
         m_Device->newBuffer(
@@ -1310,154 +1336,123 @@ void MTLRenderer::buildBindlessTextureBuffer()
             MTL::ResourceStorageModeShared
         );
 
-
     if (!m_BindlessTextureBuffer)
     {
-        SDL_Log(
-            "Failed to create bindless texture buffer"
-        );
-
-
         encoder->release();
-
         return;
     }
 
-
-    m_BindlessTextureBuffer->setLabel(
-        NS::String::string(
-            "BindlessTextureBuffer",
-            NS::StringEncoding::UTF8StringEncoding
-        )
+    /*
+        ONE argument buffer.
+    */
+    encoder->setArgumentBuffer(
+        m_BindlessTextureBuffer,
+        0
     );
 
+    /*
+        Array elements.
 
+        textures[0] = texture 0
+        textures[1] = texture 1
+        textures[2] = texture 2
+    */
     for (NS::UInteger i = 0;
-         i <
-         static_cast<NS::UInteger>(
-             m_Textures.size()
-         );
-         ++i)
+         i < m_Textures.size();
+         i++)
     {
-        encoder->setArgumentBuffer(
-            m_BindlessTextureBuffer,
-            i * elementStride
-        );
-
-
         encoder->setTexture(
             m_Textures[i],
-            0
+            i
         );
     }
-
+ 
+    encoder->release();
 
     SDL_Log(
         "Bindless texture buffer created: %zu textures",
         m_Textures.size()
     );
-
-
-    encoder->release();
 }
-
-
 // ============================================================
 // Texture upload
 // ============================================================
 
-void MTLRenderer::uploadTexture()
+bool MTLRenderer::uploadTexture(
+    uint32_t textureIndex,
+    MTL::Buffer* stagingBuffer
+)
 {
-    if (m_Textures.empty())
-        return;
+    if (textureIndex >= m_Textures.size())
+        return false;
 
-
-    if (!m_TextureStagingBuffer)
-        return;
-
+    if (!stagingBuffer)
+        return false;
 
     MTL::Texture* texture =
-        m_Textures[0];
+        m_Textures[textureIndex];
 
+    const NS::UInteger width =
+        texture->width();
 
-    const uint32_t width =
-        static_cast<uint32_t>(
-            texture->width()
-        );
+    const NS::UInteger height =
+        texture->height();
 
-
-    const uint32_t height =
-        static_cast<uint32_t>(
-            texture->height()
-        );
-
+    constexpr size_t bytesPerPixel = 4;
 
     const size_t bytesPerRow =
-        static_cast<size_t>(width) * 4;
+        static_cast<size_t>(width) *
+        bytesPerPixel;
 
+    SDL_Log(
+        "Uploading texture %u: %zux%zu row=%zu image=%zu",
+        textureIndex,
+        static_cast<size_t>(width),
+        static_cast<size_t>(height),
+        bytesPerRow,
+        bytesPerRow * static_cast<size_t>(height)
+    );
 
-    const size_t textureSize =
-        bytesPerRow * height;
-
-
-    MTL::SharedEvent* uploadEvent =
+    MTL::SharedEvent* event =
         m_Device->newSharedEvent();
 
-
-    if (!uploadEvent)
+    if (!event)
     {
         SDL_Log(
-            "Failed to create texture upload event"
+            "Failed to create upload event"
         );
 
-        return;
+        return false;
     }
 
-
-    uploadEvent->setSignaledValue(0);
-
+    event->setSignaledValue(0);
 
     MTL4::CommandAllocator* allocator =
         m_CommandAllocators[0];
 
-
     allocator->reset();
-
 
     m_CommandBuffer->beginCommandBuffer(
         allocator
     );
 
-
     MTL4::ComputeCommandEncoder* encoder =
         m_CommandBuffer->computeCommandEncoder();
 
-
     if (!encoder)
     {
-        SDL_Log(
-            "Failed to create Metal 4 compute encoder"
-        );
-
-
         m_CommandBuffer->endCommandBuffer();
+        event->release();
 
-
-        uploadEvent->release();
-
-        return;
+        return false;
     }
 
-
     encoder->copyFromBuffer(
-        m_TextureStagingBuffer,
+        stagingBuffer,
 
-        0,
-
-        bytesPerRow,
-
-        textureSize,
-
+        0,                  // sourceOffset
+        bytesPerRow,        // sourceBytesPerRow
+        0,                  // sourceBytesPerImage
         MTL::Size::Make(
             width,
             height,
@@ -1466,9 +1461,8 @@ void MTLRenderer::uploadTexture()
 
         texture,
 
-        0,
-
-        0,
+        0,                  // destinationSlice
+        0,                  // destinationLevel
 
         MTL::Origin::Make(
             0,
@@ -1479,54 +1473,62 @@ void MTLRenderer::uploadTexture()
         0
     );
 
-
     encoder->endEncoding();
 
-
     m_CommandBuffer->endCommandBuffer();
-
-
-    m_CommandQueue->signalEvent(
-        uploadEvent,
-        1
-    );
-
 
     MTL4::CommandBuffer* commandBuffers[] =
     {
         m_CommandBuffer
     };
 
+    // ========================================================
+    // FIRST: submit the actual upload
+    // ========================================================
 
     m_CommandQueue->commit(
         commandBuffers,
         1
     );
 
+    // ========================================================
+    // SECOND: signal AFTER the upload has been committed
+    // ========================================================
+
+    m_CommandQueue->signalEvent(
+        event,
+        1
+    );
+
+    // ========================================================
+    // NOW waiting for 1 actually waits for the upload
+    // ========================================================
 
     const bool completed =
-        uploadEvent->waitUntilSignaledValue(
+        event->waitUntilSignaledValue(
             1,
             10000
         );
 
+    event->release();
 
     if (!completed)
     {
         SDL_Log(
-            "Texture upload timed out"
+            "Upload of texture %u timed out",
+            textureIndex
         );
+
+        return false;
     }
 
+    SDL_Log(
+        "Upload of texture %u completed",
+        textureIndex
+    );
 
-    uploadEvent->release();
-
-
-    m_TextureStagingBuffer->release();
-
-    m_TextureStagingBuffer = nullptr;
+    return true;
 }
-
 
 // ============================================================
 // Sampler
@@ -1857,7 +1859,7 @@ void MTLRenderer::updateFrameData(uint32_t frameIndex)
                 1.0f
             );
     }
-
+ 
     memcpy(
         m_QuadInstanceBuffersMapped[frameIndex],
         instances,

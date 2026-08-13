@@ -15,6 +15,7 @@ struct MeshVertex
     float4 position : SV_Position;
     float4 color    : COLOR;
     float2 texCoord : TEXCOORD;
+    nointerpolation uint textureIndex : TEXCOORD1;
 };
 
 [vk::binding(1, 0)]
@@ -67,7 +68,8 @@ void meshMain(
         )
     ),
         instance.color,
-        uv[0]
+        uv[0],
+       0
 );
 
     vertices[1] = MeshVertex(
@@ -79,7 +81,8 @@ void meshMain(
         )
     ),
         instance.color,
-        uv[1]
+        uv[1],
+        0
 );
 
     vertices[2] = MeshVertex(
@@ -91,7 +94,8 @@ void meshMain(
         )
     ),
         instance.color,
-        uv[2]
+        uv[2],
+        0
 );
 
     vertices[3] = MeshVertex(
@@ -103,7 +107,9 @@ void meshMain(
         )
     ),
         instance.color,
-        uv[3]
+        uv[3],
+       0
+
 );
 
     triangles[0] = uint3(0, 1, 2);

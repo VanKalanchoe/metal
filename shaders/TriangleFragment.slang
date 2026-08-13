@@ -3,6 +3,7 @@ struct MeshVertex
     float4 position : SV_Position;
     float4 color    : COLOR;
     float2 texCoord : TEXCOORD;
+    uint32_t textureIndex : TEXCOORD1;
 };
 
 struct TextureContainer
@@ -19,9 +20,7 @@ SamplerState diffuseSampler
     : register(s0, space1);
 
 [shader("fragment")]
-float4 fragmentMain(
-    MeshVertex input
-) : SV_Target
+float4 fragmentMain(MeshVertex input) : SV_Target
 {
     return bindlessTextures
         .textures[0]

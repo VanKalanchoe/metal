@@ -20,12 +20,12 @@ list(APPEND _cmake_import_check_files_for_slang::slang-llvm "${_IMPORT_PREFIX}/l
 set_property(TARGET slang::slang-glslang APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(slang::slang-glslang PROPERTIES
   IMPORTED_COMMON_LANGUAGE_RUNTIME_RELEASE ""
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libslang-glslang.dylib"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libslang-glslang-2026.12.2.dylib"
   IMPORTED_NO_SONAME_RELEASE "TRUE"
   )
 
 list(APPEND _cmake_import_check_targets slang::slang-glslang )
-list(APPEND _cmake_import_check_files_for_slang::slang-glslang "${_IMPORT_PREFIX}/lib/libslang-glslang.dylib" )
+list(APPEND _cmake_import_check_files_for_slang::slang-glslang "${_IMPORT_PREFIX}/lib/libslang-glslang-2026.12.2.dylib" )
 
 # Import target "slang::slangd" for configuration "Release"
 set_property(TARGET slang::slangd APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
@@ -49,33 +49,33 @@ list(APPEND _cmake_import_check_files_for_slang::slangi "${_IMPORT_PREFIX}/bin/s
 set_property(TARGET slang::gfx APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(slang::gfx PROPERTIES
   IMPORTED_LINK_DEPENDENT_LIBRARIES_RELEASE "slang::slang"
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libgfx.dylib"
-  IMPORTED_SONAME_RELEASE "@rpath/libgfx.dylib"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libgfx.0.2026.12.2.dylib"
+  IMPORTED_SONAME_RELEASE "@rpath/libgfx.0.2026.12.2.dylib"
   )
 
 list(APPEND _cmake_import_check_targets slang::gfx )
-list(APPEND _cmake_import_check_files_for_slang::gfx "${_IMPORT_PREFIX}/lib/libgfx.dylib" )
+list(APPEND _cmake_import_check_files_for_slang::gfx "${_IMPORT_PREFIX}/lib/libgfx.0.2026.12.2.dylib" )
 
 # Import target "slang::slang-glsl-module" for configuration "Release"
 set_property(TARGET slang::slang-glsl-module APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(slang::slang-glsl-module PROPERTIES
   IMPORTED_COMMON_LANGUAGE_RUNTIME_RELEASE ""
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libslang-glsl-module.dylib"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libslang-glsl-module-2026.12.2.dylib"
   IMPORTED_NO_SONAME_RELEASE "TRUE"
   )
 
 list(APPEND _cmake_import_check_targets slang::slang-glsl-module )
-list(APPEND _cmake_import_check_files_for_slang::slang-glsl-module "${_IMPORT_PREFIX}/lib/libslang-glsl-module.dylib" )
+list(APPEND _cmake_import_check_files_for_slang::slang-glsl-module "${_IMPORT_PREFIX}/lib/libslang-glsl-module-2026.12.2.dylib" )
 
 # Import target "slang::slang" for configuration "Release"
 set_property(TARGET slang::slang APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(slang::slang PROPERTIES
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libslang.dylib"
-  IMPORTED_SONAME_RELEASE "@rpath/libslang.dylib"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libslang-compiler.0.2026.12.2.dylib"
+  IMPORTED_SONAME_RELEASE "@rpath/libslang-compiler.0.2026.12.2.dylib"
   )
 
 list(APPEND _cmake_import_check_targets slang::slang )
-list(APPEND _cmake_import_check_files_for_slang::slang "${_IMPORT_PREFIX}/lib/libslang.dylib" )
+list(APPEND _cmake_import_check_files_for_slang::slang "${_IMPORT_PREFIX}/lib/libslang-compiler.0.2026.12.2.dylib" )
 
 # Import target "slang::slangc" for configuration "Release"
 set_property(TARGET slang::slangc APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
@@ -85,6 +85,15 @@ set_target_properties(slang::slangc PROPERTIES
 
 list(APPEND _cmake_import_check_targets slang::slangc )
 list(APPEND _cmake_import_check_files_for_slang::slangc "${_IMPORT_PREFIX}/bin/slangc" )
+
+# Import target "slang::slang-dispatcher" for configuration "Release"
+set_property(TARGET slang::slang-dispatcher APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
+set_target_properties(slang::slang-dispatcher PROPERTIES
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/bin/slang"
+  )
+
+list(APPEND _cmake_import_check_targets slang::slang-dispatcher )
+list(APPEND _cmake_import_check_files_for_slang::slang-dispatcher "${_IMPORT_PREFIX}/bin/slang" )
 
 # Commands beyond this point should not need to know the version.
 set(CMAKE_IMPORT_FILE_VERSION)
