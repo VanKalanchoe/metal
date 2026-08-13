@@ -167,6 +167,7 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
 
     buildQuadInstances(quadCount);
     buildMeshArguments();
+    buildIndirectBuffer();
     // --------------------------------------------------------
     // Shader + pipeline
     // --------------------------------------------------------
@@ -260,6 +261,13 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
             m_QuadInstanceBuffer
         );
     }
+    
+    if (m_IndirectBuffer)
+    {
+        m_ResidencySet->addAllocation(
+            m_IndirectBuffer
+        );
+    }
 
     m_ResidencySet->commit();
 
@@ -342,6 +350,12 @@ MTLRenderer::~MTLRenderer()
     {
         m_QuadInstanceBuffer->release();
         m_QuadInstanceBuffer = nullptr;
+    }
+    
+    if (m_IndirectBuffer)
+    {
+        m_IndirectBuffer->release();
+        m_IndirectBuffer = nullptr;
     }
 
     // --------------------------------------------------------
@@ -1677,6 +1691,34 @@ void MTLRenderer::buildMeshArguments()
     args->instanceReference =
         m_QuadInstanceBuffer->gpuAddress();
 }
+void MTLRenderer::buildIndirectBuffer()
+{
+    DrawMeshTasksIndirectCommand command
+    {
+        m_QuadInstanceCount,
+        1,
+        1
+    };
+
+    m_IndirectBuffer =
+        m_Device->newBuffer(
+            sizeof(DrawMeshTasksIndirectCommand),
+            MTL::ResourceStorageModeShared
+        );
+
+    if (!m_IndirectBuffer)
+    {
+        SDL_Log("Failed to create indirect buffer");
+        return;
+    }
+
+    memcpy(
+        m_IndirectBuffer->contents(),
+        &command,
+        sizeof(command)
+    );
+}
+
 // ============================================================
 // Viewport
 // ============================================================
@@ -1688,6 +1730,35 @@ void MTLRenderer::updateViewportSize(
 {
     m_ViewportSize =
         simd_make_uint2(width, height);
+
+    if (!m_MeshArguments || height == 0)
+        return;
+
+    auto* args =
+        reinterpret_cast<MeshArguments*>(
+            m_MeshArguments->contents()
+        );
+
+    const float aspect =
+        static_cast<float>(width) /
+        static_cast<float>(height);
+
+    const glm::mat4 projection =
+        glm::perspective(
+            glm::radians(60.0f),
+            aspect,
+            0.1f,
+            100.0f
+        );
+
+    const glm::mat4 view =
+        glm::translate(
+            glm::mat4(1.0f),
+            glm::vec3(0.0f, 0.0f, -5.0f)
+        );
+
+    args->viewProjection =
+        projection * view;
 }
 
 // ============================================================
@@ -2053,21 +2124,9 @@ void MTLRenderer::draw()
     // --------------------------------------------------------
 
     encoder->drawMeshThreadgroups(
-        MTL::Size::Make(
-            m_QuadInstanceCount,
-            1,
-            1
-        ),
-        MTL::Size::Make(
-            1,
-            1,
-            1
-        ),
-        MTL::Size::Make(
-            32,
-            1,
-            1
-        )
+        m_IndirectBuffer->gpuAddress(),
+        MTL::Size::Make(1, 1, 1),
+        MTL::Size::Make(32, 1, 1)
     );
 
 

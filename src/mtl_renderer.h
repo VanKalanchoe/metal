@@ -50,6 +50,7 @@ public:
     void buildBuffers();
     void buildQuadInstances(uint32_t instanceCount);
     void buildMeshArguments();
+    void buildIndirectBuffer();
 
     void updateViewportSize(
         uint32_t width,
@@ -149,8 +150,16 @@ private:
     // ========================================================
 
     MTL::Buffer* m_QuadInstanceBuffer = nullptr;
-
+    MTL::Buffer* m_IndirectBuffer = nullptr;
     uint32_t m_QuadInstanceCount = 0;
+    struct DrawMeshTasksIndirectCommand
+    {
+        uint32_t groupCountX;
+        uint32_t groupCountY;
+        uint32_t groupCountZ;
+    };
+
+    static_assert(sizeof(DrawMeshTasksIndirectCommand) == 12);
 };
 
 }
