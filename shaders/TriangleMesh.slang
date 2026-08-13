@@ -1,31 +1,21 @@
 struct MeshArguments
 {
+    float4x4 viewProjection;
     uint64_t instanceReference;
-    uint2 viewportSize;
 };
 
 struct QuadInstance
 {
-    float2 position;
-    float2 size;
+    float4x4 modelMatrix;
     float4 color;
-    float angle;
 };
 
 struct MeshVertex
 {
     float4 position : SV_Position;
-    float4 color : COLOR;
+    float4 color    : COLOR;
     float2 texCoord : TEXCOORD;
 };
-
-float2 rotatePoint(float2 p, float c, float s)
-{
-    return float2(
-        p.x * c - p.y * s,
-        p.x * s + p.y * c
-    );
-}
 
 [vk::binding(1, 0)]
 ConstantBuffer<MeshArguments> meshArgs
@@ -52,69 +42,69 @@ void meshMain(
     QuadInstance instance =
         instances[groupID.x];
 
-    float2 viewport =
-        float2(meshArgs.viewportSize);
+    static const float4 positions[4] =
+    {
+        float4(-0.5, -0.5, 0.0, 1.0),
+        float4( 0.5, -0.5, 0.0, 1.0),
+        float4( 0.5,  0.5, 0.0, 1.0),
+        float4(-0.5,  0.5, 0.0, 1.0)
+    };
 
-    float2 halfSize =
-        instance.size * 0.5;
-
-    float c = cos(instance.angle);
-    float s = sin(instance.angle);
-
-    float2 scale = viewport * 0.5;
-
-    float2 p0 =
-        rotatePoint(
-            float2(-halfSize.x, -halfSize.y),
-            c, s
-        ) + instance.position;
-
-    float2 p1 =
-        rotatePoint(
-            float2( halfSize.x, -halfSize.y),
-            c, s
-        ) + instance.position;
-
-    float2 p2 =
-        rotatePoint(
-            float2( halfSize.x,  halfSize.y),
-            c, s
-        ) + instance.position;
-
-    float2 p3 =
-        rotatePoint(
-            float2(-halfSize.x,  halfSize.y),
-            c, s
-        ) + instance.position;
-
-    p0 /= scale;
-    p1 /= scale;
-    p2 /= scale;
-    p3 /= scale;
+    static const float2 uv[4] =
+    {
+        float2(0.0, 0.0),
+        float2(1.0, 0.0),
+        float2(1.0, 1.0),
+        float2(0.0, 1.0)
+    };
 
     vertices[0] = MeshVertex(
-        float4(p0, 0, 1),
+        mul(
+            meshArgs.viewProjection,
+            mul(
+                instance.modelMatrix,
+                positions[0]
+        )
+    ),
         instance.color,
-        float2(0, 1)
-    );
+        uv[0]
+);
 
     vertices[1] = MeshVertex(
-        float4(p1, 0, 1),
+        mul(
+            meshArgs.viewProjection,
+            mul(
+                instance.modelMatrix,
+                positions[1]
+        )
+    ),
         instance.color,
-        float2(1, 1)
-    );
+        uv[1]
+);
 
     vertices[2] = MeshVertex(
-        float4(p2, 0, 1),
+        mul(
+            meshArgs.viewProjection,
+            mul(
+                instance.modelMatrix,
+                positions[2]
+        )
+    ),
         instance.color,
-        float2(1, 0)
-    );
+        uv[2]
+);
 
     vertices[3] = MeshVertex(
-        float4(p3, 0, 1),
+        mul(
+            meshArgs.viewProjection,
+            mul(
+                instance.modelMatrix,
+                positions[3]
+        )
+    ),
         instance.color,
-        float2(0, 0)
-    );
+        uv[3]
+);
 
     triangles[0] = uint3(0, 1, 2);
     triangles[1] = uint3(0, 2, 3);

@@ -6,29 +6,24 @@
 
 #include <vector>
 
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/glm.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/vec4.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace NRI
 {
 
 struct QuadInstance
 {
-    simd_float2 position;
-    simd_float2 size;
-    simd_float4 color;
-    float angle;
+    glm::mat4 modelMatrix;
+    glm::vec4 color;
 };
 
-static_assert(sizeof(QuadInstance) == 48);
-
-
-struct DrawMeshTasksIndirectCommand
-{
-    uint32_t groupCountX;
-    uint32_t groupCountY;
-    uint32_t groupCountZ;
-};
-
-static_assert(sizeof(DrawMeshTasksIndirectCommand) == 12);
-
+static_assert(sizeof(QuadInstance) == 80);
 
 class MTLRenderer
 {
@@ -54,7 +49,6 @@ public:
 
     void buildBuffers();
     void buildQuadInstances(uint32_t instanceCount);
-    void buildIndirectBuffer();
     void buildMeshArguments();
 
     void updateViewportSize(
@@ -108,6 +102,8 @@ private:
         m_RenderPipelineState = nullptr;
 
     simd_uint2 m_ViewportSize = {};
+    glm::mat4 m_View = glm::mat4(1.0f);
+    glm::mat4 m_Projection = glm::mat4(1.0f);
 
     float _angle = 0.0f;
     Uint64 _lastFrameTime = 0;
@@ -120,11 +116,13 @@ private:
 
     struct alignas(16) MeshArguments
     {
+        glm::mat4 viewProjection;
         uint64_t instanceReference;
-        simd_uint2 viewportSize;
+        uint32_t padding0;
+        uint32_t padding1;
     };
 
-    static_assert(sizeof(MeshArguments) == 16);
+    static_assert(sizeof(MeshArguments) == 80);
 
     MTL::Buffer* m_MeshArguments = nullptr;
 
@@ -146,13 +144,11 @@ private:
     MTL::ArgumentEncoder*
         m_BindlessTextureEncoder = nullptr;
 
-
     // ========================================================
     // Quads
     // ========================================================
 
     MTL::Buffer* m_QuadInstanceBuffer = nullptr;
-    MTL::IndirectCommandBuffer* m_IndirectCommandBuffer = nullptr;
 
     uint32_t m_QuadInstanceCount = 0;
 };
