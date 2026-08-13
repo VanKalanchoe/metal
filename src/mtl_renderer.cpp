@@ -12,23 +12,6 @@
 
 namespace NRI
 {
-
-// ============================================================
-// CPU-side mesh arguments
-// ============================================================
-
-struct alignas(16) MeshArguments
-{
-    simd_uint2 viewportSize;
-
-    float angle;
-
-    float padding;
-};
-
-static_assert(sizeof(MeshArguments) == 16);
-
-
 // ============================================================
 // Autorelease pool
 // ============================================================
@@ -164,14 +147,19 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
 
     buildSampler();
 
-    buildBuffers();
+    //buildBuffers();
+    constexpr uint32_t quadCount = 4;
 
-
+    buildQuadInstances(quadCount);
+    buildMeshArguments();
     // --------------------------------------------------------
     // Shader + pipeline
     // --------------------------------------------------------
 
     buildShaders();
+    //buildIndirectBuffer();
+
+    
 
 
     // --------------------------------------------------------
@@ -248,6 +236,20 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
     {
         m_ResidencySet->addAllocation(
             m_BindlessTextureBuffer
+        );
+    }
+    
+    if (m_QuadInstanceBuffer)
+    {
+        m_ResidencySet->addAllocation(
+            m_QuadInstanceBuffer
+        );
+    }
+
+    if (m_IndirectCommandBuffer)
+    {
+        m_ResidencySet->addAllocation(
+            m_IndirectCommandBuffer
         );
     }
 
@@ -339,6 +341,17 @@ MTLRenderer::~MTLRenderer()
         m_BindlessTextureEncoder = nullptr;
     }
 
+    if (m_IndirectCommandBuffer)
+    {
+        m_IndirectCommandBuffer->release();
+        m_IndirectCommandBuffer = nullptr;
+    }
+
+    if (m_QuadInstanceBuffer)
+    {
+        m_QuadInstanceBuffer->release();
+        m_QuadInstanceBuffer = nullptr;
+    }
 
     // --------------------------------------------------------
     // Bindless buffer
@@ -635,19 +648,7 @@ void MTLRenderer::buildArgumentTable()
 // ============================================================
 
 void MTLRenderer::buildShaders()
-{SDL_Log(
-         "Apple7: %s",
-         m_Device->supportsFamily(
-             MTL::GPUFamilyApple7
-         ) ? "YES" : "NO"
-     );
-
-     SDL_Log(
-         "Mac2: %s",
-         m_Device->supportsFamily(
-             MTL::GPUFamilyMac2
-         ) ? "YES" : "NO"
-     );
+{
     using NS::StringEncoding::UTF8StringEncoding;
 
     NS::Error* error = nullptr;
@@ -667,7 +668,9 @@ void MTLRenderer::buildShaders()
 
     if (meshMSL.empty())
     {
-        SDL_Log("TriangleMesh.slang produced no MSL");
+        SDL_Log(
+            "TriangleMesh.slang produced no MSL"
+        );
         return;
     }
 
@@ -679,17 +682,148 @@ void MTLRenderer::buildShaders()
 
     if (fragmentMSL.empty())
     {
-        SDL_Log("TriangleFragment.slang produced no MSL");
+        SDL_Log(
+            "TriangleFragment.slang produced no MSL"
+        );
         return;
     }
 
 
     // ============================================================
-    // METAL 4 COMPILER
+    // PRINT
     // ============================================================
 
-    MTL4::CompilerDescriptor* compilerDescriptor =
-        MTL4::CompilerDescriptor::alloc()->init();
+    printf(
+        "\n================ GENERATED MESH MSL ================\n"
+    );
+
+    fwrite(
+        meshMSL.data(),
+        1,
+        meshMSL.size(),
+        stdout
+    );
+
+    printf(
+        "\n================ END GENERATED MESH MSL ============\n"
+    );
+
+
+    printf(
+        "\n================ GENERATED FRAGMENT MSL ============\n"
+    );
+
+    fwrite(
+        fragmentMSL.data(),
+        1,
+        fragmentMSL.size(),
+        stdout
+    );
+
+    printf(
+        "\n================ END GENERATED FRAGMENT MSL ========\n"
+    );
+
+
+    // ============================================================
+    // CREATE NORMAL METAL LIBRARIES
+    //
+    // IMPORTANT:
+    //
+    // Slang-generated MSL -> MTL::Library
+    //
+    // Do NOT use MTL4::Compiler::newLibrary() here.
+    // ============================================================
+
+    NS::String* meshSource =
+        NS::String::string(
+            std::string(
+                meshMSL.begin(),
+                meshMSL.end()
+            ).c_str(),
+            UTF8StringEncoding
+        );
+
+
+    m_MeshLibrary =
+        m_Device->newLibrary(
+            meshSource,
+            nullptr,
+            &error
+        );
+
+
+    if (!m_MeshLibrary)
+    {
+        SDL_Log(
+            "Failed to create mesh Metal library: %s",
+            error
+                ? error->localizedDescription()->utf8String()
+                : "Unknown error"
+        );
+
+        if (error)
+        {
+            error->release();
+            error = nullptr;
+        }
+
+        return;
+    }
+
+
+    // ============================================================
+    // FRAGMENT LIBRARY
+    // ============================================================
+
+    NS::String* fragmentSource =
+        NS::String::string(
+            std::string(
+                fragmentMSL.begin(),
+                fragmentMSL.end()
+            ).c_str(),
+            UTF8StringEncoding
+        );
+
+
+    m_FragmentLibrary =
+        m_Device->newLibrary(
+            fragmentSource,
+            nullptr,
+            &error
+        );
+
+
+    if (!m_FragmentLibrary)
+    {
+        SDL_Log(
+            "Failed to create fragment Metal library: %s",
+            error
+                ? error->localizedDescription()->utf8String()
+                : "Unknown error"
+        );
+
+        if (error)
+        {
+            error->release();
+            error = nullptr;
+        }
+
+        return;
+    }
+
+
+    // ============================================================
+    // MTL4 COMPILER
+    //
+    // Use it for PIPELINE creation.
+    // ============================================================
+
+    MTL4::CompilerDescriptor*
+        compilerDescriptor =
+            MTL4::CompilerDescriptor::alloc()
+                ->init();
+
 
     MTL4::Compiler* compiler =
         m_Device->newCompiler(
@@ -697,7 +831,9 @@ void MTLRenderer::buildShaders()
             &error
         );
 
+
     compilerDescriptor->release();
+
 
     if (!compiler)
     {
@@ -709,94 +845,11 @@ void MTLRenderer::buildShaders()
         );
 
         if (error)
+        {
             error->release();
+            error = nullptr;
+        }
 
-        return;
-    }
-
-
-    // ============================================================
-    // MESH LIBRARY
-    // ============================================================
-
-    MTL4::LibraryDescriptor* meshLibraryDescriptor =
-        MTL4::LibraryDescriptor::alloc()->init();
-
-    meshLibraryDescriptor->setSource(
-        NS::String::string(
-            std::string(
-                meshMSL.begin(),
-                meshMSL.end()
-            ).c_str(),
-            UTF8StringEncoding
-        )
-    );
-
-    m_MeshLibrary =
-        compiler->newLibrary(
-            meshLibraryDescriptor,
-            
-            &error
-        );
-
-    meshLibraryDescriptor->release();
-
-    if (!m_MeshLibrary)
-    {
-        SDL_Log(
-            "Failed to compile MTL4 mesh library: %s",
-            error
-                ? error->localizedDescription()->utf8String()
-                : "Unknown error"
-        );
-
-        if (error)
-            error->release();
-
-        compiler->release();
-        return;
-    }
-
-
-    // ============================================================
-    // FRAGMENT LIBRARY
-    // ============================================================
-
-    MTL4::LibraryDescriptor* fragmentLibraryDescriptor =
-        MTL4::LibraryDescriptor::alloc()->init();
-
-    fragmentLibraryDescriptor->setSource(
-        NS::String::string(
-            std::string(
-                fragmentMSL.begin(),
-                fragmentMSL.end()
-            ).c_str(),
-            UTF8StringEncoding
-        )
-    );
-
-    m_FragmentLibrary =
-        compiler->newLibrary(
-            fragmentLibraryDescriptor,
-         
-            &error
-        );
-
-    fragmentLibraryDescriptor->release();
-
-    if (!m_FragmentLibrary)
-    {
-        SDL_Log(
-            "Failed to compile MTL4 fragment library: %s",
-            error
-                ? error->localizedDescription()->utf8String()
-                : "Unknown error"
-        );
-
-        if (error)
-            error->release();
-
-        compiler->release();
         return;
     }
 
@@ -805,8 +858,10 @@ void MTLRenderer::buildShaders()
     // MESH FUNCTION
     // ============================================================
 
-    MTL4::LibraryFunctionDescriptor* meshFunction =
-        MTL4::LibraryFunctionDescriptor::alloc()->init();
+    MTL4::LibraryFunctionDescriptor*
+        meshFunction =
+            MTL4::LibraryFunctionDescriptor::alloc()
+                ->init();
 
     meshFunction->setLibrary(
         m_MeshLibrary
@@ -824,8 +879,10 @@ void MTLRenderer::buildShaders()
     // FRAGMENT FUNCTION
     // ============================================================
 
-    MTL4::LibraryFunctionDescriptor* fragmentFunction =
-        MTL4::LibraryFunctionDescriptor::alloc()->init();
+    MTL4::LibraryFunctionDescriptor*
+        fragmentFunction =
+            MTL4::LibraryFunctionDescriptor::alloc()
+                ->init();
 
     fragmentFunction->setLibrary(
         m_FragmentLibrary
@@ -840,15 +897,18 @@ void MTLRenderer::buildShaders()
 
 
     // ============================================================
-    // MESH PIPELINE
+    // PIPELINE
     // ============================================================
 
-    MTL4::MeshRenderPipelineDescriptor* pipelineDescriptor =
-        MTL4::MeshRenderPipelineDescriptor::alloc()->init();
+    MTL4::MeshRenderPipelineDescriptor*
+        pipelineDescriptor =
+            MTL4::MeshRenderPipelineDescriptor::alloc()
+                ->init();
+
 
     pipelineDescriptor->setLabel(
         NS::String::string(
-            "NRI Mesh Pipeline",
+            "NRI Metal 4 Mesh Pipeline",
             UTF8StringEncoding
         )
     );
@@ -858,27 +918,25 @@ void MTLRenderer::buildShaders()
         meshFunction
     );
 
+
     pipelineDescriptor->setFragmentFunctionDescriptor(
         fragmentFunction
     );
 
 
-    // Shader:
-    //
-    // [numthreads(32, 1, 1)]
-    //
-
     pipelineDescriptor->setMaxTotalThreadsPerMeshThreadgroup(
         32
     );
 
-    pipelineDescriptor->setMeshThreadgroupSizeIsMultipleOfThreadExecutionWidth(
-        true
-    );
+
+    pipelineDescriptor
+        ->setMeshThreadgroupSizeIsMultipleOfThreadExecutionWidth(
+            true
+        );
 
 
     // ============================================================
-    // COLOR
+    // COLOR ATTACHMENT
     // ============================================================
 
     auto* colorAttachment =
@@ -886,30 +944,31 @@ void MTLRenderer::buildShaders()
             ->colorAttachments()
             ->object(0);
 
+
     colorAttachment->setPixelFormat(
         MTL::PixelFormat::PixelFormatBGRA8Unorm_sRGB
     );
 
 
-    // ============================================================
-    // BLENDING
-    // ============================================================
-
     colorAttachment->setBlendingState(
         MTL4::BlendState::BlendStateEnabled
     );
+
 
     colorAttachment->setSourceRGBBlendFactor(
         MTL::BlendFactor::BlendFactorSourceAlpha
     );
 
+
     colorAttachment->setDestinationRGBBlendFactor(
         MTL::BlendFactor::BlendFactorOneMinusSourceAlpha
     );
 
+
     colorAttachment->setSourceAlphaBlendFactor(
         MTL::BlendFactor::BlendFactorOne
     );
+
 
     colorAttachment->setDestinationAlphaBlendFactor(
         MTL::BlendFactor::BlendFactorOneMinusSourceAlpha
@@ -917,7 +976,7 @@ void MTLRenderer::buildShaders()
 
 
     // ============================================================
-    // PIPELINE
+    // CREATE MTL4 PIPELINE
     // ============================================================
 
     m_RenderPipelineState =
@@ -938,7 +997,10 @@ void MTLRenderer::buildShaders()
         );
 
         if (error)
+        {
             error->release();
+            error = nullptr;
+        }
 
         compiler->release();
 
@@ -949,10 +1011,6 @@ void MTLRenderer::buildShaders()
         return;
     }
 
-
-    // ============================================================
-    // CLEANUP
-    // ============================================================
 
     compiler->release();
 
@@ -1535,12 +1593,58 @@ void MTLRenderer::buildSampler()
     }
 }
 
+void MTLRenderer::buildQuadInstances(uint32_t count)
+{
+    m_QuadInstanceCount = count;
 
-// ============================================================
-// Buffers
-// ============================================================
+    m_QuadInstanceBuffer =
+        m_Device->newBuffer(
+            sizeof(QuadInstance) * count,
+            MTL::ResourceStorageModeShared
+        );
 
-void MTLRenderer::buildBuffers()
+    if (!m_QuadInstanceBuffer)
+    {
+        SDL_Log("Failed to create quad instance buffer");
+        return;
+    }
+
+    auto* instances =
+        reinterpret_cast<QuadInstance*>(
+            m_QuadInstanceBuffer->contents()
+        );
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        uint32_t x = i % 2;
+        uint32_t y = i / 2;
+
+        instances[i].position =
+            simd_make_float2(
+                250.0f + x * 450.0f,
+                250.0f + y * 350.0f
+            );
+
+        instances[i].size =
+            simd_make_float2(
+                200.0f,
+                200.0f
+            );
+
+        instances[i].color =
+            simd_make_float4(
+                1.0f,
+                1.0f,
+                1.0f,
+                1.0f
+            );
+
+        instances[i].angle =
+            0.0f;
+    }
+}
+
+void MTLRenderer::buildMeshArguments()
 {
     m_MeshArguments =
         m_Device->newBuffer(
@@ -1548,43 +1652,77 @@ void MTLRenderer::buildBuffers()
             MTL::ResourceStorageModeShared
         );
 
-
     if (!m_MeshArguments)
     {
-        SDL_Log(
-            "Failed to create mesh arguments buffer"
-        );
-
+        SDL_Log("Failed to create mesh arguments buffer");
         return;
     }
-
-
-    m_MeshArguments->setLabel(
-        NS::String::string(
-            "MeshArguments",
-            NS::StringEncoding::UTF8StringEncoding
-        )
-    );
-
 
     auto* args =
         reinterpret_cast<MeshArguments*>(
             m_MeshArguments->contents()
         );
 
+    args->instanceReference =
+        m_QuadInstanceBuffer->gpuAddress();
 
     args->viewportSize =
         m_ViewportSize;
-
-
-    args->angle =
-        0.0f;
-
-
-    args->padding =
-        0.0f;
 }
 
+void MTLRenderer::buildIndirectBuffer()
+{
+    MTL::IndirectCommandBufferDescriptor* descriptor =
+        MTL::IndirectCommandBufferDescriptor::alloc()->init();
+
+    descriptor->setCommandTypes(
+        MTL::IndirectCommandTypeDrawMeshThreadgroups
+    );
+
+    descriptor->setInheritPipelineState(false);
+    descriptor->setInheritBuffers(false);
+
+    descriptor->setMaxMeshBufferBindCount(2);
+
+    m_IndirectCommandBuffer =
+        m_Device->newIndirectCommandBuffer(
+            descriptor,
+            m_QuadInstanceCount,
+            MTL::ResourceStorageModePrivate
+        );
+
+    descriptor->release();
+
+    if (!m_IndirectCommandBuffer)
+    {
+        SDL_Log(
+            "Failed to create indirect command buffer"
+        );
+        return;
+    }
+
+    for (uint32_t i = 0; i < m_QuadInstanceCount; ++i)
+    {
+        MTL::IndirectRenderCommand* command =
+            m_IndirectCommandBuffer->indirectRenderCommand(i);
+
+        command->setRenderPipelineState(
+            m_RenderPipelineState
+        );
+
+        command->setMeshBuffer(
+            m_MeshArguments,
+            sizeof(MeshArguments) * i,
+            1
+        );
+
+        command->drawMeshThreadgroups(
+            MTL::Size::Make(1, 1, 1),
+            MTL::Size::Make(1, 1, 1),
+            MTL::Size::Make(32, 1, 1)
+        );
+    }
+}
 
 // ============================================================
 // Viewport
@@ -1601,16 +1739,13 @@ void MTLRenderer::updateViewportSize(
             height
         );
 
-
     if (!m_MeshArguments)
         return;
-
 
     auto* args =
         reinterpret_cast<MeshArguments*>(
             m_MeshArguments->contents()
         );
-
 
     args->viewportSize =
         m_ViewportSize;
@@ -1701,94 +1836,31 @@ void MTLRenderer::setRenderPassArguments(
     MTL4::RenderCommandEncoder* encoder
 )
 {
-    // ========================================================
-    // UPDATE ANGLE
-    // ========================================================
-
-    constexpr float PI =
-        3.14159265358979323846f;
-
-    constexpr float rotationSpeed =
-        60.0f * (PI / 180.0f);
-
-    _angle +=
-        rotationSpeed * _deltaTime;
-
-    if (_angle >= 2.0f * PI)
-    {
-        _angle -= 2.0f * PI;
-    }
-
-
-    // ========================================================
-    // UPDATE MESH ARGUMENTS
-    // ========================================================
-
-    auto* args =
-        reinterpret_cast<MeshArguments*>(
-            m_MeshArguments->contents()
-        );
-
-    args->viewportSize =
-        m_ViewportSize;
-
-    args->angle =
-        _angle;
-
-
-    // ========================================================
-    // BUFFER 0
-    //
-    // Exactly the same bindless buffer you already had working.
-    // ========================================================
-
     m_ArgumentTable->setAddress(
         m_BindlessTextureBuffer->gpuAddress(),
         0
     );
-
-
-    // ========================================================
-    // BUFFER 1
-    // ========================================================
 
     m_ArgumentTable->setAddress(
         m_MeshArguments->gpuAddress(),
         1
     );
 
-
-    // ========================================================
-    // SAMPLER 0
-    // ========================================================
-
     m_ArgumentTable->setSamplerState(
         m_Sampler->gpuResourceID(),
         0
     );
-
-
-    // ========================================================
-    // MESH
-    // ========================================================
 
     encoder->setArgumentTable(
         m_ArgumentTable,
         MTL::RenderStageMesh
     );
 
-
-    // ========================================================
-    // FRAGMENT
-    // ========================================================
-
     encoder->setArgumentTable(
         m_ArgumentTable,
         MTL::RenderStageFragment
     );
 }
-
-
 // ============================================================
 // Submit
 // ============================================================
@@ -2044,21 +2116,15 @@ void MTLRenderer::draw()
 
     encoder->drawMeshThreadgroups(
         MTL::Size::Make(
-            1,
+            m_QuadInstanceCount,
             1,
             1
         ),
-
-        // No object shader.
-
         MTL::Size::Make(
             1,
             1,
             1
         ),
-
-        // Mesh threadgroup.
-
         MTL::Size::Make(
             32,
             1,
