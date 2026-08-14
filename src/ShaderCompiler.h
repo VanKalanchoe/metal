@@ -14,5 +14,6 @@ namespace NRI
     };
     
     std::unique_ptr<ShaderCompiler> CreateSlangCompiler();
+    std::unique_ptr<ShaderCompiler> CreateMetalCompiler();
 }
 

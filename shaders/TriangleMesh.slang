@@ -8,14 +8,15 @@ struct QuadInstance
 {
     float4x4 modelMatrix;
     float4 color;
+    uint32_t textureIndex;
+    uint3 _padding;
 };
 
 struct MeshVertex
 {
     float4 position : SV_Position;
     float4 color    : COLOR;
-    float2 texCoord : TEXCOORD;
-    nointerpolation uint textureIndex : TEXCOORD1;
+    float3 texCoord : TEXCOORD;
 };
 
 [vk::binding(1, 0)]
@@ -51,65 +52,40 @@ void meshMain(
         float4(-0.5,  0.5, 0.0, 1.0)
     };
 
-    static const float2 uv[4] =
-    {
-        float2(0.0, 0.0),
-        float2(1.0, 0.0),
-        float2(1.0, 1.0),
-        float2(0.0, 1.0)
-    };
-
     vertices[0] = MeshVertex(
         mul(
             meshArgs.viewProjection,
-            mul(
-                instance.modelMatrix,
-                positions[0]
-        )
+            mul(instance.modelMatrix, positions[0])
     ),
         instance.color,
-        uv[0],
-       0
+        float3(0.0, 0.0, float(instance.textureIndex))
 );
 
     vertices[1] = MeshVertex(
         mul(
             meshArgs.viewProjection,
-            mul(
-                instance.modelMatrix,
-                positions[1]
-        )
+            mul(instance.modelMatrix, positions[1])
     ),
         instance.color,
-        uv[1],
-        0
+        float3(1.0, 0.0, float(instance.textureIndex))
 );
 
     vertices[2] = MeshVertex(
         mul(
             meshArgs.viewProjection,
-            mul(
-                instance.modelMatrix,
-                positions[2]
-        )
+            mul(instance.modelMatrix, positions[2])
     ),
         instance.color,
-        uv[2],
-        0
+        float3(1.0, 1.0, float(instance.textureIndex))
 );
 
     vertices[3] = MeshVertex(
         mul(
             meshArgs.viewProjection,
-            mul(
-                instance.modelMatrix,
-                positions[3]
-        )
+            mul(instance.modelMatrix, positions[3])
     ),
         instance.color,
-        uv[3],
-       0
-
+        float3(0.0, 1.0, float(instance.textureIndex))
 );
 
     triangles[0] = uint3(0, 1, 2);

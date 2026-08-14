@@ -21,9 +21,11 @@ struct alignas(16) QuadInstance
 {
     glm::mat4 modelMatrix;
     glm::vec4 color;
+    uint32_t textureIndex;
+    uint32_t _padding[3];
 };
 
-static_assert(sizeof(QuadInstance) == 80);
+static_assert(sizeof(QuadInstance) == 96);
 
 class MTLRenderer
 {
@@ -104,8 +106,7 @@ private:
 
     uint64_t frameNumber = 0;
 
-    MTL::Library* m_MeshLibrary = nullptr;
-    MTL::Library* m_FragmentLibrary = nullptr;
+    MTL::Library* m_ShaderLibrary = nullptr;
 
     MTL::RenderPipelineState*
         m_RenderPipelineState = nullptr;

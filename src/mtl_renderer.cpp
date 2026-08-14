@@ -385,16 +385,10 @@ MTLRenderer::~MTLRenderer()
     // Shader library
     // --------------------------------------------------------
 
-    if (m_MeshLibrary)
+    if (m_ShaderLibrary)
     {
-        m_MeshLibrary->release();
-        m_MeshLibrary = nullptr;
-    }
-
-    if (m_FragmentLibrary)
-    {
-        m_FragmentLibrary->release();
-        m_FragmentLibrary = nullptr;
+        m_ShaderLibrary->release();
+        m_ShaderLibrary = nullptr;
     }
 
     // --------------------------------------------------------
@@ -712,176 +706,74 @@ void MTLRenderer::buildShaders()
     NS::Error* error = nullptr;
 
     auto shaderCompiler =
-        CreateSlangCompiler();
+        CreateMetalCompiler();
 
-
-    // ============================================================
-    // SLANG -> MSL
-    // ============================================================
-
-    std::vector<char> meshMSL =
+    std::vector<char> shaderMSL =
         shaderCompiler->compile(
-            "../../shaders/TriangleMesh.slang"
+            "../../shaders/QuadMesh.metal"
         );
 
-    if (meshMSL.empty())
+    if (shaderMSL.empty())
     {
         SDL_Log(
-            "TriangleMesh.slang produced no MSL"
+            "QuadMesh.metal produced no MSL"
         );
         return;
     }
 
-
-    std::vector<char> fragmentMSL =
-        shaderCompiler->compile(
-            "../../shaders/TriangleFragment.slang"
-        );
-
-    if (fragmentMSL.empty())
-    {
-        SDL_Log(
-            "TriangleFragment.slang produced no MSL"
-        );
-        return;
-    }
-
-
-    // ============================================================
-    // PRINT
-    // ============================================================
-
     printf(
-        "\n================ GENERATED MESH MSL ================\n"
+        "\n================ METAL SHADER ================\n"
     );
 
     fwrite(
-        meshMSL.data(),
+        shaderMSL.data(),
         1,
-        meshMSL.size(),
+        shaderMSL.size(),
         stdout
     );
 
     printf(
-        "\n================ END GENERATED MESH MSL ============\n"
+        "\n================ END METAL SHADER ============\n"
     );
 
-
-    printf(
-        "\n================ GENERATED FRAGMENT MSL ============\n"
-    );
-
-    fwrite(
-        fragmentMSL.data(),
-        1,
-        fragmentMSL.size(),
-        stdout
-    );
-
-    printf(
-        "\n================ END GENERATED FRAGMENT MSL ========\n"
-    );
-
-
-    // ============================================================
-    // CREATE NORMAL METAL LIBRARIES
-    //
-    // IMPORTANT:
-    //
-    // Slang-generated MSL -> MTL::Library
-    //
-    // Do NOT use MTL4::Compiler::newLibrary() here.
-    // ============================================================
-
-    NS::String* meshSource =
+    NS::String* source =
         NS::String::string(
             std::string(
-                meshMSL.begin(),
-                meshMSL.end()
+                shaderMSL.begin(),
+                shaderMSL.end()
             ).c_str(),
             UTF8StringEncoding
         );
 
-
-    m_MeshLibrary =
+    m_ShaderLibrary =
         m_Device->newLibrary(
-            meshSource,
+            source,
             nullptr,
             &error
         );
 
-
-    if (!m_MeshLibrary)
+    if (!m_ShaderLibrary)
     {
         SDL_Log(
-            "Failed to create mesh Metal library: %s",
+            "Failed to create Metal shader library: %s",
             error
                 ? error->localizedDescription()->utf8String()
                 : "Unknown error"
         );
 
         if (error)
-        {
             error->release();
-            error = nullptr;
-        }
 
         return;
     }
 
-
-    // ============================================================
-    // FRAGMENT LIBRARY
-    // ============================================================
-
-    NS::String* fragmentSource =
-        NS::String::string(
-            std::string(
-                fragmentMSL.begin(),
-                fragmentMSL.end()
-            ).c_str(),
-            UTF8StringEncoding
-        );
-
-
-    m_FragmentLibrary =
-        m_Device->newLibrary(
-            fragmentSource,
-            nullptr,
-            &error
-        );
-
-
-    if (!m_FragmentLibrary)
-    {
-        SDL_Log(
-            "Failed to create fragment Metal library: %s",
-            error
-                ? error->localizedDescription()->utf8String()
-                : "Unknown error"
-        );
-
-        if (error)
-        {
-            error->release();
-            error = nullptr;
-        }
-
-        return;
-    }
-
-
-    // ============================================================
+    // ========================================================
     // MTL4 COMPILER
-    //
-    // Use it for PIPELINE creation.
-    // ============================================================
+    // ========================================================
 
     MTL4::CompilerDescriptor*
         compilerDescriptor =
-            MTL4::CompilerDescriptor::alloc()
-                ->init();
-
+            MTL4::CompilerDescriptor::alloc()->init();
 
     MTL4::Compiler* compiler =
         m_Device->newCompiler(
@@ -889,9 +781,7 @@ void MTLRenderer::buildShaders()
             &error
         );
 
-
     compilerDescriptor->release();
-
 
     if (!compiler)
     {
@@ -903,26 +793,21 @@ void MTLRenderer::buildShaders()
         );
 
         if (error)
-        {
             error->release();
-            error = nullptr;
-        }
 
         return;
     }
 
-
-    // ============================================================
+    // ========================================================
     // MESH FUNCTION
-    // ============================================================
+    // ========================================================
 
     MTL4::LibraryFunctionDescriptor*
         meshFunction =
-            MTL4::LibraryFunctionDescriptor::alloc()
-                ->init();
+            MTL4::LibraryFunctionDescriptor::alloc()->init();
 
     meshFunction->setLibrary(
-        m_MeshLibrary
+        m_ShaderLibrary
     );
 
     meshFunction->setName(
@@ -932,18 +817,16 @@ void MTLRenderer::buildShaders()
         )
     );
 
-
-    // ============================================================
+    // ========================================================
     // FRAGMENT FUNCTION
-    // ============================================================
+    // ========================================================
 
     MTL4::LibraryFunctionDescriptor*
         fragmentFunction =
-            MTL4::LibraryFunctionDescriptor::alloc()
-                ->init();
+            MTL4::LibraryFunctionDescriptor::alloc()->init();
 
     fragmentFunction->setLibrary(
-        m_FragmentLibrary
+        m_ShaderLibrary
     );
 
     fragmentFunction->setName(
@@ -953,16 +836,13 @@ void MTLRenderer::buildShaders()
         )
     );
 
-
-    // ============================================================
+    // ========================================================
     // PIPELINE
-    // ============================================================
+    // ========================================================
 
     MTL4::MeshRenderPipelineDescriptor*
         pipelineDescriptor =
-            MTL4::MeshRenderPipelineDescriptor::alloc()
-                ->init();
-
+            MTL4::MeshRenderPipelineDescriptor::alloc()->init();
 
     pipelineDescriptor->setLabel(
         NS::String::string(
@@ -971,71 +851,59 @@ void MTLRenderer::buildShaders()
         )
     );
 
-
     pipelineDescriptor->setMeshFunctionDescriptor(
         meshFunction
     );
-
 
     pipelineDescriptor->setFragmentFunctionDescriptor(
         fragmentFunction
     );
 
-
     pipelineDescriptor->setMaxTotalThreadsPerMeshThreadgroup(
         32
     );
-
 
     pipelineDescriptor
         ->setMeshThreadgroupSizeIsMultipleOfThreadExecutionWidth(
             true
         );
 
-
-    // ============================================================
+    // ========================================================
     // COLOR ATTACHMENT
-    // ============================================================
+    // ========================================================
 
     auto* colorAttachment =
         pipelineDescriptor
             ->colorAttachments()
             ->object(0);
 
-
     colorAttachment->setPixelFormat(
         MTL::PixelFormat::PixelFormatBGRA8Unorm_sRGB
     );
-
 
     colorAttachment->setBlendingState(
         MTL4::BlendState::BlendStateEnabled
     );
 
-
     colorAttachment->setSourceRGBBlendFactor(
         MTL::BlendFactor::BlendFactorSourceAlpha
     );
-
 
     colorAttachment->setDestinationRGBBlendFactor(
         MTL::BlendFactor::BlendFactorOneMinusSourceAlpha
     );
 
-
     colorAttachment->setSourceAlphaBlendFactor(
         MTL::BlendFactor::BlendFactorOne
     );
-
 
     colorAttachment->setDestinationAlphaBlendFactor(
         MTL::BlendFactor::BlendFactorOneMinusSourceAlpha
     );
 
-
-    // ============================================================
-    // CREATE MTL4 PIPELINE
-    // ============================================================
+    // ========================================================
+    // CREATE PIPELINE
+    // ========================================================
 
     m_RenderPipelineState =
         compiler->newRenderPipelineState(
@@ -1043,7 +911,6 @@ void MTLRenderer::buildShaders()
             nullptr,
             &error
         );
-
 
     if (!m_RenderPipelineState)
     {
@@ -1055,10 +922,7 @@ void MTLRenderer::buildShaders()
         );
 
         if (error)
-        {
             error->release();
-            error = nullptr;
-        }
 
         compiler->release();
 
@@ -1069,13 +933,11 @@ void MTLRenderer::buildShaders()
         return;
     }
 
-
     compiler->release();
 
     meshFunction->release();
     fragmentFunction->release();
     pipelineDescriptor->release();
-
 
     SDL_Log(
         "MTL4 mesh pipeline created successfully"
@@ -1300,7 +1162,7 @@ uint32_t MTLRenderer::buildTexture(const char* path)
 void MTLRenderer::buildBindlessTextureBuffer()
 {
     MTL::Function* fragmentFunction =
-        m_FragmentLibrary->newFunction(
+    m_ShaderLibrary->newFunction(
             NS::String::string(
                 "fragmentMain",
                 NS::StringEncoding::UTF8StringEncoding
@@ -1859,6 +1721,10 @@ void MTLRenderer::updateFrameData(uint32_t frameIndex)
                 1.0f
             );
     }
+    instances[0].textureIndex = m_ChernoTexture;
+    instances[1].textureIndex = m_CheckerboardTexture;
+    instances[2].textureIndex = m_ChernoTexture;
+    instances[3].textureIndex = m_Image1Texture;
  
     memcpy(
         m_QuadInstanceBuffersMapped[frameIndex],

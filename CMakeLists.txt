@@ -106,6 +106,29 @@ if(APPLE)
 
 endif()
 
+
+file(GLOB_RECURSE METAL_SHADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.metal"
+)
+
+set_source_files_properties(
+    ${METAL_SHADERS}
+    PROPERTIES
+        HEADER_FILE_ONLY TRUE
+)
+
+target_sources(${PROJECT_NAME}
+    PRIVATE
+        ${METAL_SHADERS}
+)
+
+# Keep the physical shader folder visible in Xcode.
+source_group(
+    "Shaders"
+    FILES
+        ${METAL_SHADERS}
+)
+
 # Make Xcode groups follow the physical directory structure
 foreach(SOURCE_FILE IN LISTS PROJECT_SOURCES)
 
