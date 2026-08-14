@@ -17,15 +17,14 @@
 namespace NRI
 {
 
-struct alignas(16) QuadInstance
+struct QuadInstance
 {
     glm::mat4 modelMatrix;
     glm::vec4 color;
     uint32_t textureIndex;
-    uint32_t _padding[3];
 };
 
-static_assert(sizeof(QuadInstance) == 96);
+static_assert(sizeof(QuadInstance) == 84);
 
 class MTLRenderer
 {
