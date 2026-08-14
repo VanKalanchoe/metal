@@ -23,9 +23,9 @@ struct MeshVertex
     float3 texCoord;
 };
 
-struct TextureContainer
+struct TextureArgument
 {
-    array<texture2d<float, access::sample>, 1024> textures;
+    texture2d<float, access::sample> texture;
 };
 
 struct PrimitiveData
@@ -205,15 +205,15 @@ void meshMain(
 
 fragment float4 fragmentMain(
     MeshVertex input [[stage_in]],
-    constant TextureContainer* bindlessTextures [[buffer(0)]],
+    device TextureArgument* textures [[buffer(0)]],
     sampler diffuseSampler [[sampler(0)]]
 )
 {
     uint textureIndex =
         uint(input.texCoord.z);
 
-    return bindlessTextures
-        ->textures[textureIndex]
+    return textures[textureIndex]
+        .texture
         .sample(
             diffuseSampler,
             input.texCoord.xy

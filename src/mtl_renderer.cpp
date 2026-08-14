@@ -721,21 +721,6 @@ void MTLRenderer::buildShaders()
         return;
     }
 
-    printf(
-        "\n================ METAL SHADER ================\n"
-    );
-
-    fwrite(
-        shaderMSL.data(),
-        1,
-        shaderMSL.size(),
-        stdout
-    );
-
-    printf(
-        "\n================ END METAL SHADER ============\n"
-    );
-
     NS::String* source =
         NS::String::string(
             std::string(
@@ -1072,7 +1057,7 @@ uint32_t MTLRenderer::buildTexture(const char* path)
     );
 
     MTL::Texture* texture =
-        m_Device->newTexture(descriptor);
+    m_TextureHeap->newTexture(descriptor);
 
     descriptor->release();
 
@@ -1161,36 +1146,14 @@ uint32_t MTLRenderer::buildTexture(const char* path)
 
 void MTLRenderer::buildBindlessTextureBuffer()
 {
-    MTL::Function* fragmentFunction =
-    m_ShaderLibrary->newFunction(
-            NS::String::string(
-                "fragmentMain",
-                NS::StringEncoding::UTF8StringEncoding
-            )
-        );
+    const size_t textureCount =
+        m_Textures.size();
 
-    if (!fragmentFunction)
-        return;
+    const size_t entrySize =
+        sizeof(uint64_t);
 
-    MTL::ArgumentEncoder* encoder =
-        fragmentFunction->newArgumentEncoder(0);
-
-    fragmentFunction->release();
-
-    if (!encoder)
-        return;
-
-    /*
-        IMPORTANT:
-
-        encodedLength() is the size of ONE
-        TextureContainer argument-buffer record.
-
-        Since we have ONE TextureContainer,
-        we allocate ONE record.
-    */
-    const NS::UInteger bufferSize =
-        encoder->encodedLength();
+    const size_t bufferSize =
+        textureCount * entrySize;
 
     m_BindlessTextureBuffer =
         m_Device->newBuffer(
@@ -1200,40 +1163,29 @@ void MTLRenderer::buildBindlessTextureBuffer()
 
     if (!m_BindlessTextureBuffer)
     {
-        encoder->release();
+        SDL_Log(
+            "Failed to create bindless texture argument buffer"
+        );
+
         return;
     }
 
-    /*
-        ONE argument buffer.
-    */
-    encoder->setArgumentBuffer(
-        m_BindlessTextureBuffer,
-        0
-    );
-
-    /*
-        Array elements.
-
-        textures[0] = texture 0
-        textures[1] = texture 1
-        textures[2] = texture 2
-    */
-    for (NS::UInteger i = 0;
-         i < m_Textures.size();
-         i++)
-    {
-        encoder->setTexture(
-            m_Textures[i],
-            i
+    auto* arguments =
+        static_cast<uint64_t*>(
+            m_BindlessTextureBuffer->contents()
         );
+
+    for (size_t i = 0;
+         i < textureCount;
+         ++i)
+    {
+        arguments[i] =
+            m_Textures[i]->gpuResourceID()._impl;
     }
- 
-    encoder->release();
 
     SDL_Log(
-        "Bindless texture buffer created: %zu textures",
-        m_Textures.size()
+        "Tier-2 texture argument buffer created: %zu textures",
+        textureCount
     );
 }
 // ============================================================
