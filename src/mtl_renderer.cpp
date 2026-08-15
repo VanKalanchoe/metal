@@ -1709,7 +1709,7 @@ void MTLRenderer::createSceneTexture(
             glm::vec3(
                 0.0f,
                 0.0f,
-                -1.0f
+                -5.0f
             )
         );
 
@@ -2022,7 +2022,7 @@ void MTLRenderer::applyPendingResize()
             glm::vec3(
                 0.0f,
                 0.0f,
-                -1.0f
+                -5.0f
             )
         );
 
