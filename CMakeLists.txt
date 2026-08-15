@@ -113,14 +113,6 @@ file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.mm"
 )
 
-# Force mtl_renderer.cpp to compile as Objective-C++ on macOS without renaming on disk
-if(APPLE)
-    set_source_files_properties(
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/mtl_renderer.cpp"
-        PROPERTIES LANGUAGE OBJCXX
-    )
-endif()
-
 add_executable(${PROJECT_NAME}
     ${PROJECT_SOURCES}
     ${IMGUI_SOURCES}
@@ -135,6 +127,15 @@ if(APPLE)
 
 endif()
 
+if(APPLE)
+
+    target_compile_definitions(
+        ${PROJECT_NAME}
+        PRIVATE
+            IMGUI_IMPL_METAL_CPP
+    )
+
+endif()
 
 file(GLOB_RECURSE METAL_SHADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.metal"

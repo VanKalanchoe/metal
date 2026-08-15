@@ -387,7 +387,7 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
 
   
         // Setup Platform/Renderer backends
-        ImGui_ImplMetal4_Init((__bridge id<MTLDevice>)m_Device, (__bridge id<MTL4CommandQueue>)m_CommandQueue, kMaxFramesInFlight);
+        ImGui_ImplMetal4_Init(m_Device, m_CommandQueue, kMaxFramesInFlight);
         ImGui_ImplSDL3_InitForMetal(&window);
 
         // Load Fonts
@@ -2583,7 +2583,6 @@ void MTLRenderer::draw()
     // ========================================================
 
     ImGui_ImplMetal4_NewFrame(
-        (__bridge MTL4RenderPassDescriptor*)
             imguiPass,
         frameIndex
     );
@@ -2696,15 +2695,13 @@ void MTLRenderer::draw()
     ImGui_ImplMetal4_RenderDrawData(
         drawData,
 
-        (__bridge id<MTL4CommandBuffer>)
-            static_cast<NS::Object*>(
+        
                 m_CommandBuffer
-            ),
+            ,
 
-        (__bridge id<MTL4RenderCommandEncoder>)
-            static_cast<NS::Object*>(
+      
                 imguiEncoder
-            )
+            
     );
 
 
