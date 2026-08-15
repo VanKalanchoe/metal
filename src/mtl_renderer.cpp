@@ -9,6 +9,9 @@
 #include <string>
 #include <vector>
 
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_metal4.h>
+#include <imgui_internal.h>// For Docking
 
 namespace NRI
 {
@@ -38,11 +41,28 @@ struct ScopedAutoreleasePool
 uint32_t m_ChernoTexture = UINT32_MAX;
 uint32_t m_CheckerboardTexture = UINT32_MAX;
 uint32_t m_Image1Texture = UINT32_MAX;
+SDL_Window* windows;
 MTLRenderer::MTLRenderer(SDL_Window& window)
     : _angle(0.0f),
       _lastFrameTime(SDL_GetPerformanceCounter()),
       _deltaTime(0.0f)
-{
+{windows = &window;
+    // --------------------------------------------------------
+    // Device
+    // --------------------------------------------------------
+
+    m_Device =
+        MTL::CreateSystemDefaultDevice();
+
+    if (!m_Device)
+    {
+        SDL_Log(
+            "Failed to create Metal device"
+        );
+
+        return;
+    }
+    
     // --------------------------------------------------------
     // SDL Metal view
     // --------------------------------------------------------
@@ -78,24 +98,6 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
 
         return;
     }
-
-
-    // --------------------------------------------------------
-    // Device
-    // --------------------------------------------------------
-
-    m_Device =
-        MTL::CreateSystemDefaultDevice();
-
-    if (!m_Device)
-    {
-        SDL_Log(
-            "Failed to create Metal device"
-        );
-
-        return;
-    }
-
 
     m_layer->setDevice(m_Device);
 
@@ -232,7 +234,6 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
             static_cast<uint32_t>(height)
         );
 
-
     // --------------------------------------------------------
     // Per-frame buffers
     // --------------------------------------------------------
@@ -272,7 +273,7 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
     // --------------------------------------------------------
 
     frameNumber = 0;
-
+    m_LastSubmittedFrame = 0;
 
     // --------------------------------------------------------
     // Shared event
@@ -357,10 +358,55 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
     // Initial viewport
     // --------------------------------------------------------
 
-    updateViewportSize(
+    createSceneTexture(
         static_cast<uint32_t>(width),
         static_cast<uint32_t>(height)
     );
+    
+    // Setup Dear ImGui context
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO(); (void)io;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
+      //  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
+
+
+        // Setup Dear ImGui style
+        ImGui::StyleColorsDark();
+        //ImGui::StyleColorsLight();
+
+        // When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
+        ImGuiStyle& style = ImGui::GetStyle();
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        {
+            style.WindowRounding = 0.0f;
+            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+        }
+
+  
+        // Setup Platform/Renderer backends
+        ImGui_ImplMetal4_Init((__bridge id<MTLDevice>)m_Device, (__bridge id<MTL4CommandQueue>)m_CommandQueue, kMaxFramesInFlight);
+        ImGui_ImplSDL3_InitForMetal(&window);
+
+        // Load Fonts
+        // - If fonts are not explicitly loaded, Dear ImGui will select an embedded font: either AddFontDefaultVector() or AddFontDefaultBitmap().
+        //   This selection is based on (style.FontSizeBase * style.FontScaleMain * style.FontScaleDpi) reaching a small threshold.
+        // - You can load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
+        // - If a file cannot be loaded, AddFont functions will return a nullptr. Please handle those errors in your code (e.g. use an assertion, display an error and quit).
+        // - Read 'docs/FONTS.md' for more instructions and details.
+        // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use FreeType for higher quality font rendering.
+        // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
+        //style.FontSizeBase = 20.0f;
+        //io.Fonts->AddFontDefaultVector();
+        //io.Fonts->AddFontDefaultBitmap();
+        //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
+        //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
+        //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
+        //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
+        //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
+        //IM_ASSERT(font != nullptr);
 }
 
 
@@ -1491,19 +1537,65 @@ void MTLRenderer::buildIndirectBuffer()
     }
 }
 // ============================================================
-// Viewport
+// Scene texture
 // ============================================================
 
-void MTLRenderer::updateViewportSize(
+void MTLRenderer::createSceneTexture(
     uint32_t width,
-    uint32_t height
-)
+    uint32_t height)
 {
+    if (width == 0 || height == 0)
+        return;
+
+    MTL::TextureDescriptor* descriptor =
+        MTL::TextureDescriptor::alloc()->init();
+
+    descriptor->setTextureType(
+        MTL::TextureType::TextureType2D
+    );
+
+    descriptor->setPixelFormat(
+        MTL::PixelFormat::PixelFormatBGRA8Unorm_sRGB
+    );
+
+    descriptor->setWidth(width);
+    descriptor->setHeight(height);
+
+    descriptor->setMipmapLevelCount(1);
+    descriptor->setSampleCount(1);
+
+    descriptor->setUsage(
+        MTL::TextureUsageRenderTarget |
+        MTL::TextureUsageShaderRead
+    );
+
+    descriptor->setStorageMode(
+        MTL::StorageMode::StorageModePrivate
+    );
+
+    MTL::Texture* texture =
+    m_Device->newTexture(descriptor);
+
+    descriptor->release();
+
+    if (!texture)
+    {
+        SDL_Log(
+            "Failed to create scene texture %ux%u",
+            width,
+            height
+        );
+
+        return;
+    }
+
+    m_ResidencySet->addAllocation(texture);
+    m_ResidencySet->commit();
+
+    m_SceneTexture = texture;
+
     m_ViewportSize =
         simd_make_uint2(width, height);
-
-    if (height == 0)
-        return;
 
     const float aspect =
         static_cast<float>(width) /
@@ -1520,10 +1612,261 @@ void MTLRenderer::updateViewportSize(
     m_View =
         glm::translate(
             glm::mat4(1.0f),
-            glm::vec3(0.0f, 0.0f, -5.0f)
+            glm::vec3(
+                0.0f,
+                0.0f,
+                -5.0f
+            )
         );
 }
+void MTLRenderer::destroySceneTexture()
+{
+    if (!m_SceneTexture)
+        return;
 
+    if (m_ResidencySet)
+    {
+        m_ResidencySet->removeAllocation(
+            m_SceneTexture
+        );
+
+        m_ResidencySet->commit();
+    }
+
+    m_SceneTexture->release();
+    m_SceneTexture = nullptr;
+}
+
+ImTextureID MTLRenderer::getImGuiTextureID() const
+{
+    return static_cast<ImTextureID>(
+        reinterpret_cast<uintptr_t>(m_SceneTexture)
+    );
+}
+
+// ============================================================
+// Viewport
+// ============================================================
+
+void MTLRenderer::updateViewportSize(
+    uint32_t width,
+    uint32_t height)
+{
+    if (width == 0 || height == 0)
+        return;
+
+    // Already rendering at this size.
+    if (m_ViewportSize.x == width &&
+        m_ViewportSize.y == height)
+    {
+        return;
+    }
+
+    // Resize already waiting for this exact size.
+    if (m_ResizePending &&
+        m_PendingViewportSize.x == width &&
+        m_PendingViewportSize.y == height)
+    {
+        return;
+    }
+
+    m_PendingViewportSize =
+        simd_make_uint2(
+            width,
+            height
+        );
+
+    m_ResizePending = true;
+}
+bool MTLRenderer::waitForGPUIdle()
+{
+    // Nothing has been submitted yet.
+    if (m_LastSubmittedFrame == 0)
+        return true;
+
+    constexpr uint64_t timeoutMS = 10000;
+
+    const uint64_t frameToWaitFor =
+        m_LastSubmittedFrame;
+
+    const bool completed =
+        m_SharedEvent->waitUntilSignaledValue(
+            frameToWaitFor,
+            timeoutMS
+        );
+
+    if (!completed)
+    {
+        SDL_Log(
+            "GPU idle wait timed out. "
+            "lastSubmitted=%llu eventValue=%llu",
+            static_cast<unsigned long long>(
+                frameToWaitFor
+            ),
+            static_cast<unsigned long long>(
+                m_SharedEvent->signaledValue()
+            )
+        );
+    }
+
+    return completed;
+}
+void MTLRenderer::applyPendingResize()
+{
+    if (!m_ResizePending)
+        return;
+
+    const uint32_t width =
+        m_PendingViewportSize.x;
+
+    const uint32_t height =
+        m_PendingViewportSize.y;
+
+    if (width == 0 || height == 0)
+        return;
+
+    // ========================================================
+    // WAIT FOR THE LAST SUBMITTED FRAME
+    // ========================================================
+
+    if (!waitForGPUIdle())
+    {
+        SDL_Log(
+            "Resize postponed: GPU still using old scene texture"
+        );
+
+        return;
+    }
+
+    // ========================================================
+    // CREATE NEW TEXTURE FIRST
+    //
+    // Do NOT destroy m_SceneTexture until this succeeds.
+    // ========================================================
+
+    MTL::TextureDescriptor* descriptor =
+        MTL::TextureDescriptor::alloc()->init();
+
+    descriptor->setTextureType(
+        MTL::TextureType::TextureType2D
+    );
+
+    descriptor->setPixelFormat(
+        MTL::PixelFormat::PixelFormatBGRA8Unorm_sRGB
+    );
+
+    descriptor->setWidth(width);
+    descriptor->setHeight(height);
+
+    descriptor->setMipmapLevelCount(1);
+    descriptor->setSampleCount(1);
+
+    descriptor->setUsage(
+        MTL::TextureUsageRenderTarget |
+        MTL::TextureUsageShaderRead
+    );
+
+    descriptor->setStorageMode(
+        MTL::StorageMode::StorageModePrivate
+    );
+
+    MTL::Texture* newTexture =
+        m_Device->newTexture(
+            descriptor
+        );
+
+    descriptor->release();
+
+    if (!newTexture)
+    {
+        SDL_Log(
+            "Failed to create scene texture %ux%u",
+            width,
+            height
+        );
+
+        // Keep the old texture.
+        // We will try the resize again later.
+        return;
+    }
+
+    // ========================================================
+    // OLD TEXTURE
+    // ========================================================
+
+    if (m_SceneTexture)
+    {
+        m_ResidencySet->removeAllocation(
+            m_SceneTexture
+        );
+    }
+
+    // ========================================================
+    // NEW TEXTURE
+    // ========================================================
+
+    m_ResidencySet->addAllocation(
+        newTexture
+    );
+
+    // Apply both removal + addition together.
+    m_ResidencySet->commit();
+
+    // Now it is safe to destroy the old texture.
+    if (m_SceneTexture)
+    {
+        m_SceneTexture->release();
+        m_SceneTexture = nullptr;
+    }
+
+    m_SceneTexture =
+        newTexture;
+
+    // ========================================================
+    // UPDATE VIEWPORT
+    // ========================================================
+
+    m_ViewportSize =
+        m_PendingViewportSize;
+
+    // ========================================================
+    // UPDATE PROJECTION
+    // ========================================================
+
+    const float aspect =
+        static_cast<float>(width) /
+        static_cast<float>(height);
+
+    m_Projection =
+        glm::perspective(
+            glm::radians(60.0f),
+            aspect,
+            0.1f,
+            100.0f
+        );
+
+    m_View =
+        glm::translate(
+            glm::mat4(1.0f),
+            glm::vec3(
+                0.0f,
+                0.0f,
+                -5.0f
+            )
+        );
+
+    // ========================================================
+    // DONE
+    // ========================================================
+
+    m_ResizePending = false;
+
+    SDL_Log(
+        "Scene resized successfully: %ux%u",
+        width,
+        height
+    );
+}
 // ============================================================
 // Shared event
 // ============================================================
@@ -1730,23 +2073,30 @@ void MTLRenderer::submitCommandBuffer(
         drawable
     );
 
-
     MTL4::CommandBuffer* commandBuffers[] =
     {
         m_CommandBuffer
     };
 
-
+    // Submit this frame.
     m_CommandQueue->commit(
         commandBuffers,
         1
     );
 
+    // This event value represents THIS submitted frame.
+    m_CommandQueue->signalEvent(
+        m_SharedEvent,
+        frameNumber
+    );
+
+    // This is now officially the last submitted frame.
+    m_LastSubmittedFrame =
+        frameNumber;
 
     m_CommandQueue->signalDrawable(
         drawable
     );
-
 
     drawable->present();
 }
@@ -1760,14 +2110,11 @@ void MTLRenderer::draw()
 {
     ScopedAutoreleasePool autoreleasePool;
 
+    // ========================================================
+    // DELTA TIME
+    // ========================================================
 
-    // --------------------------------------------------------
-    // Delta time
-    // --------------------------------------------------------
-
-    const Uint64 currentTime =
-        SDL_GetPerformanceCounter();
-
+    const Uint64 currentTime = SDL_GetPerformanceCounter();
 
     if (_lastFrameTime == 0)
     {
@@ -1777,239 +2124,441 @@ void MTLRenderer::draw()
     {
         _deltaTime =
             static_cast<float>(
-                static_cast<double>(
-                    currentTime -
-                    _lastFrameTime
-                ) /
-                static_cast<double>(
-                    SDL_GetPerformanceFrequency()
-                )
+                static_cast<double>(currentTime - _lastFrameTime) /
+                static_cast<double>(SDL_GetPerformanceFrequency())
             );
     }
 
-
-    _lastFrameTime =
-        currentTime;
+    _lastFrameTime = currentTime;
 
 
-    // --------------------------------------------------------
-    // Frame index
-    // --------------------------------------------------------
+    // ========================================================
+    // FRAME INDEX
+    // ========================================================
 
-    frameNumber++;
-
+    ++frameNumber;
 
     const uint32_t frameIndex =
-        frameNumber %
-        kMaxFramesInFlight;
+        frameNumber % kMaxFramesInFlight;
 
 
-    // --------------------------------------------------------
-    // Wait for old GPU work
-    // --------------------------------------------------------
+    // ========================================================
+    // WAIT FOR THIS FRAME SLOT
+    // ========================================================
 
     if (frameNumber > kMaxFramesInFlight)
     {
         if (!waitOnSharedEvent(
-                frameNumber -
-                kMaxFramesInFlight
-            ))
+                frameNumber - kMaxFramesInFlight))
         {
             return;
         }
     }
-    
+
+
+    // ========================================================
+    // WINDOW SIZE
+    // ========================================================
+
+    int width = 0;
+    int height = 0;
+
+    SDL_GetWindowSizeInPixels(
+        windows,
+        &width,
+        &height
+    );
+
+    if (width <= 0 || height <= 0)
+        return;
+
+
+    m_layer->setDrawableSize(
+        CGSizeMake(
+            static_cast<CGFloat>(width),
+            static_cast<CGFloat>(height)
+        )
+    );
+
+
+    // ========================================================
+    // RESIZE SCENE TEXTURE
+    // ========================================================
+
+    updateViewportSize(
+        static_cast<uint32_t>(width),
+        static_cast<uint32_t>(height)
+    );
+
+    applyPendingResize();
+
+    if (!m_SceneTexture)
+        return;
+
+
+    // ========================================================
+    // UPDATE SCENE DATA
+    // ========================================================
+
     updateFrameData(frameIndex);
 
-    // --------------------------------------------------------
-    // Command allocator
-    // --------------------------------------------------------
 
-    MTL4::CommandAllocator*
-        allocator =
-            m_CommandAllocators[
-                frameIndex
-            ];
+    // ========================================================
+    // COMMAND ALLOCATOR
+    // ========================================================
 
+    MTL4::CommandAllocator* allocator =
+        m_CommandAllocators[frameIndex];
+
+    if (!allocator)
+        return;
 
     allocator->reset();
 
 
-    // --------------------------------------------------------
-    // Begin command buffer
-    // --------------------------------------------------------
+    // ========================================================
+    // BEGIN COMMAND BUFFER
+    // ========================================================
 
     m_CommandBuffer->beginCommandBuffer(
         allocator
     );
 
 
-    // --------------------------------------------------------
-    // Drawable
-    // --------------------------------------------------------
+    // ========================================================
+    // GET SWAPCHAIN DRAWABLE
+    // ========================================================
 
     CA::MetalDrawable* drawable =
         m_layer->nextDrawable();
 
-
     if (!drawable)
     {
         m_CommandBuffer->endCommandBuffer();
-
         return;
     }
 
 
-    // --------------------------------------------------------
-    // Render pass
-    // --------------------------------------------------------
+    // ========================================================
+    // ========================================================
+    //
+    // PASS 1
+    //
+    // SCENE
+    //
+    // mesh shader quads
+    //        ↓
+    // m_SceneTexture
+    //
+    // ========================================================
+    // ========================================================
 
     MTL4::RenderPassDescriptor*
-        renderPassDescriptor =
-            MTL4::RenderPassDescriptor
-                ::alloc()
-                ->init();
+        scenePass =
+            MTL4::RenderPassDescriptor::alloc()->init();
 
+    auto* sceneColor =
+        scenePass
+            ->colorAttachments()
+            ->object(0);
 
-    MTL::RenderPassColorAttachmentDescriptor*
-        colorAttachment =
-            renderPassDescriptor
-                ->colorAttachments()
-                ->object(0);
-
-
-    colorAttachment->setTexture(
-        drawable->texture()
+    sceneColor->setTexture(
+        m_SceneTexture
     );
 
-
-    colorAttachment->setLoadAction(
+    sceneColor->setLoadAction(
         MTL::LoadAction::LoadActionClear
     );
 
-
-    colorAttachment->setStoreAction(
+    sceneColor->setStoreAction(
         MTL::StoreAction::StoreActionStore
     );
 
-
-    colorAttachment->setClearColor(
+    sceneColor->setClearColor(
         MTL::ClearColor::Make(
-            0.0,
-            0.0,
-            0.0,
+            0.00,
+            0.00,
+            0.00,
             1.0
         )
     );
 
 
-    // --------------------------------------------------------
-    // Encoder
-    // --------------------------------------------------------
+    MTL4::RenderCommandEncoder*
+        sceneEncoder =
+            m_CommandBuffer->renderCommandEncoder(
+                scenePass
+            );
 
-    MTL4::RenderCommandEncoder* encoder =
-        m_CommandBuffer->renderCommandEncoder(
-            renderPassDescriptor
-        );
-
-
-    if (!encoder)
+    if (!sceneEncoder)
     {
-        SDL_Log(
-            "Failed to create Metal 4 render encoder"
-        );
-
+        scenePass->release();
 
         m_CommandBuffer->endCommandBuffer();
-
-        renderPassDescriptor->release();
 
         return;
     }
 
 
     // --------------------------------------------------------
-    // Pipeline
+    // Scene pipeline
     // --------------------------------------------------------
 
-    encoder->setRenderPipelineState(
+    sceneEncoder->setRenderPipelineState(
         m_RenderPipelineState
     );
 
 
     // --------------------------------------------------------
-    // Viewport
+    // Scene viewport
     // --------------------------------------------------------
 
     setViewport(
-        encoder
+        sceneEncoder
     );
 
 
     // --------------------------------------------------------
-    // Arguments
+    // Scene arguments
     // --------------------------------------------------------
 
     setRenderPassArguments(
-        encoder,
+        sceneEncoder,
         frameIndex
     );
 
 
     // --------------------------------------------------------
-    // MESH DRAW
-    // --------------------------------------------------------
-    //
-    // One mesh threadgroup.
-    //
-    // Mesh shader:
-    //
-    //     [numthreads(1,1,1)]
-    //
-    // creates:
-    //
-    //     4 vertices
-    //     2 triangles
-    //
+    // Mesh shader indirect draw
     // --------------------------------------------------------
 
-    encoder->drawMeshThreadgroups(
+    sceneEncoder->drawMeshThreadgroups(
         m_IndirectBuffers[frameIndex]->gpuAddress(),
-        MTL::Size::Make(1, 1, 1),
-        MTL::Size::Make(32, 1, 1)
+        MTL::Size::Make(
+            1,
+            1,
+            1
+        ),
+        MTL::Size::Make(
+            32,
+            1,
+            1
+        )
     );
 
 
     // --------------------------------------------------------
-    // End encoding
+    // END SCENE PASS
     // --------------------------------------------------------
 
-    encoder->endEncoding();
+    sceneEncoder->endEncoding();
 
+    scenePass->release();
+
+
+    // ========================================================
+    // ========================================================
+    //
+    // PASS 2
+    //
+    // IMGUI
+    //
+    // m_SceneTexture
+    //       ↓
+    //   ImGui::Image
+    //       ↓
+    // drawable / swapchain
+    //
+    // ========================================================
+    // ========================================================
+
+    MTL4::RenderPassDescriptor*
+        imguiPass =
+            MTL4::RenderPassDescriptor::alloc()->init();
+
+    auto* imguiColor =
+        imguiPass
+            ->colorAttachments()
+            ->object(0);
+
+    imguiColor->setTexture(
+        drawable->texture()
+    );
+
+    imguiColor->setLoadAction(
+        MTL::LoadAction::LoadActionClear
+    );
+
+    imguiColor->setStoreAction(
+        MTL::StoreAction::StoreActionStore
+    );
+
+    imguiColor->setClearColor(
+        MTL::ClearColor::Make(
+            0.08,
+            0.08,
+            0.08,
+            1.0
+        )
+    );
+
+
+    // ========================================================
+    // IMGUI NEW FRAME
+    // ========================================================
+
+    ImGui_ImplMetal4_NewFrame(
+        (__bridge MTL4RenderPassDescriptor*)
+            imguiPass,
+        frameIndex
+    );
+
+    ImGui_ImplSDL3_NewFrame();
+
+    ImGui::NewFrame();
+
+           /*--
+           * IMGUI Docking
+           * Create a dockspace and dock the viewport and settings window.
+           * The central node is named "Viewport", which can be used later with Begin("Viewport")
+           * to render the final image.
+           -*/
+
+           const ImGuiDockNodeFlags dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingInCentralNode;
+
+           // 1. Grab the style and save the default minimum size
+           ImGuiStyle& style = ImGui::GetStyle();
+           float minWinSizeX = style.WindowMinSize.x;
+           float minWinSizeY = style.WindowMinSize.y;
+
+           // 2. Enforce the new minimum size globally for the DockSpace
+           style.WindowMinSize.x = 370.0f;
+
+           // 3. Submit the DockSpace (It will inherit the 370x350 constraint)
+           ImGuiID dockID = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockFlags);
+
+           // 4. Restore the original minimum size for standard floating windows
+           style.WindowMinSize.x = minWinSizeX;
+           style.WindowMinSize.y = minWinSizeY;
+
+           // Docking layout, must be done only if it doesn't exist
+           if (!ImGui::DockBuilderGetNode(dockID)->IsSplitNode() && !ImGui::FindWindowByName("Viewport"))
+           {
+               ImGui::DockBuilderDockWindow("Viewport", dockID); // Dock "Viewport" to  central node
+               ImGui::DockBuilderGetCentralNode(dockID)->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; // Remove "Tab" from the central node
+               ImGuiID leftID = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, 0.2f, nullptr, &dockID); // Split the central node
+               ImGui::DockBuilderDockWindow("Settings", leftID); // Dock "Settings" to the left node
+           }
+
+           // [optional] Show the menu bar
+           if (ImGui::BeginMainMenuBar())
+           {
+               // Adding overlay text on the upper left corner
+               ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+
+               ImGui::EndMainMenuBar();
+           }
+
+           /* END Docking */
+
+           // We define "viewport" with no padding an retrieve the rendering area
+           // Using the dock "Viewport", this sets the window to cover the entire central viewport
+           ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+           if (ImGui::Begin("Viewport"))
+           {
+               
+               
+               ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+               
+               
+               ImGui::Image(
+                            getImGuiTextureID(),
+                            viewportPanelSize
+                            );
+           }
+
+    ImGui::End();ImGui::PopStyleVar();
+    // ========================================================
+    // BUILD IMGUI DRAW DATA
+    // ========================================================
+
+    ImGui::Render();
+
+    ImDrawData* drawData =
+        ImGui::GetDrawData();
+
+
+    // ========================================================
+    // CREATE SWAPCHAIN RENDER ENCODER
+    // ========================================================
+
+    MTL4::RenderCommandEncoder*
+        imguiEncoder =
+            m_CommandBuffer->renderCommandEncoder(
+                imguiPass
+            );
+
+    if (!imguiEncoder)
+    {
+        SDL_Log("Failed to create ImGui render encoder");
+
+        imguiPass->release();
+
+        m_CommandBuffer->endCommandBuffer();
+
+        return;
+    }
+    imguiEncoder->barrierAfterQueueStages(
+        MTL::StageFragment,
+        MTL::StageFragment,
+        MTL4::VisibilityOptionDevice
+    );
+    
+ 
+    
+
+    // ========================================================
+    // RENDER IMGUI
+    // ========================================================
+
+    ImGui_ImplMetal4_RenderDrawData(
+        drawData,
+
+        (__bridge id<MTL4CommandBuffer>)
+            static_cast<NS::Object*>(
+                m_CommandBuffer
+            ),
+
+        (__bridge id<MTL4RenderCommandEncoder>)
+            static_cast<NS::Object*>(
+                imguiEncoder
+            )
+    );
+
+
+    // ========================================================
+    // END IMGUI PASS
+    // ========================================================
+
+    imguiEncoder->endEncoding();
+
+    imguiPass->release();
+
+
+    // ========================================================
+    // END COMMAND BUFFER
+    // ========================================================
 
     m_CommandBuffer->endCommandBuffer();
 
 
-    // --------------------------------------------------------
-    // Submit
-    // --------------------------------------------------------
+    // ========================================================
+    // SUBMIT
+    // ========================================================
 
     submitCommandBuffer(
         drawable
     );
-
-
-    // --------------------------------------------------------
-    // Signal frame completion
-    // --------------------------------------------------------
-
-    m_CommandQueue->signalEvent(
-        m_SharedEvent,
-        frameNumber
-    );
-
-
-    renderPassDescriptor->release();
 }
 
 }

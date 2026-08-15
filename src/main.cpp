@@ -6,6 +6,8 @@
 
 #include "mtl_renderer.h"
 
+#include <imgui_impl_sdl3.h>
+
 static SDL_Window *window = nullptr;
 static std::unique_ptr<NRI::MTLRenderer> renderer;
 
@@ -38,9 +40,15 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 /* This function runs when a new event (mouse input, keypresses, etc) occurs. */
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
+    ImGui_ImplSDL3_ProcessEvent(event);
     if (event->type == SDL_EVENT_QUIT)
     {
         return SDL_APP_SUCCESS;  /* end the program, reporting success to the OS. */
+    }
+    
+    if(event->type == SDL_EVENT_KEY_DOWN)
+    {
+        if(event->key.scancode == SDL_SCANCODE_ESCAPE) return SDL_APP_SUCCESS;
     }
     
     if(event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)

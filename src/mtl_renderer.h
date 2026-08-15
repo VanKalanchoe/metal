@@ -13,7 +13,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
+#include <imgui.h>
 namespace NRI
 {
 
@@ -30,7 +30,7 @@ class MTLRenderer
 {
 public:
 
-    static constexpr uint32_t kMaxFramesInFlight = 2;
+    static constexpr uint32_t kMaxFramesInFlight = 3;
 
     MTLRenderer(SDL_Window& window);
     ~MTLRenderer();
@@ -104,13 +104,31 @@ private:
     MTL::SharedEvent* m_SharedEvent = nullptr;
 
     uint64_t frameNumber = 0;
-
+    uint64_t m_LastSubmittedFrame = 0;
     MTL::Library* m_ShaderLibrary = nullptr;
 
     MTL::RenderPipelineState*
         m_RenderPipelineState = nullptr;
+    
+    // ========================================================
+    // Offscreen scene texture
+    // ========================================================
 
+    MTL::Texture* m_SceneTexture = nullptr;
+
+    void createSceneTexture(
+        uint32_t width,
+        uint32_t height
+    );
+
+    void destroySceneTexture();
+    bool waitForGPUIdle();
+    ImTextureID getImGuiTextureID() const;
+    void applyPendingResize();
     simd_uint2 m_ViewportSize = {};
+    
+    simd_uint2 m_PendingViewportSize = {};
+    bool m_ResizePending = false;
     glm::mat4 m_View = glm::mat4(1.0f);
     glm::mat4 m_Projection = glm::mat4(1.0f);
 

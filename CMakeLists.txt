@@ -8,7 +8,9 @@ LANGUAGES CXX
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 # ============================================================
 
 # SDL3
@@ -83,6 +85,23 @@ elseif(APPLE)
 
 endif()
 
+set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imgui")
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    # Add the specific backends matching your engine tech!
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+
+    ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
+)
+if(APPLE)
+    list(APPEND IMGUI_SOURCES
+        ${IMGUI_DIR}/backends/imgui_impl_metal4.mm
+    )
+endif()
 # ============================================================
 # Application Sources
 # ============================================================
@@ -91,10 +110,20 @@ file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.mm"
 )
+
+# Force mtl_renderer.cpp to compile as Objective-C++ on macOS without renaming on disk
+if(APPLE)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mtl_renderer.cpp"
+        PROPERTIES LANGUAGE OBJCXX
+    )
+endif()
 
 add_executable(${PROJECT_NAME}
     ${PROJECT_SOURCES}
+    ${IMGUI_SOURCES}
 )
 
 if(APPLE)
@@ -160,6 +189,8 @@ target_include_directories(${PROJECT_NAME}
 PRIVATE
 "${CMAKE_CURRENT_SOURCE_DIR}/metal-cpp"
 "${CMAKE_CURRENT_SOURCE_DIR}/stb"
+"${IMGUI_DIR}"
+"${IMGUI_DIR}/backends"
 )
 
 # ============================================================
