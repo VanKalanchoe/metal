@@ -363,6 +363,42 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
         static_cast<uint32_t>(height)
     );
     
+    // ========================================================
+    // UPDATE VIEWPORT
+    // ========================================================
+
+    m_ViewportSize =
+        simd_make_uint2(
+            width,
+            height
+        );
+
+    // ========================================================
+    // UPDATE PROJECTION
+    // ========================================================
+
+    const float aspect =
+        static_cast<float>(width) /
+        static_cast<float>(height);
+
+    m_Projection =
+        glm::perspective(
+            glm::radians(60.0f),
+            aspect,
+            0.1f,
+            100.0f
+        );
+
+    m_View =
+        glm::translate(
+            glm::mat4(1.0f),
+            glm::vec3(
+                0.0f,
+                0.0f,
+                -5.0f
+            )
+        );
+    
     // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -1554,15 +1590,19 @@ void MTLRenderer::createSceneTexture(
     if (!m_Device->supportsTextureSampleCount(sampleCount))
     {
         SDL_Log("4x MSAA is not supported");
-
         return;
     }
 
     // ========================================================
-    // RESOLVED TEXTURE
+    // DESTROY OLD SCENE TEXTURES FIRST
     //
-    // This is the texture ImGui::Image() uses.
-    // Single sample.
+    // Caller must have waited for the GPU before calling this.
+    // ========================================================
+
+    destroySceneTexture();
+
+    // ========================================================
+    // CREATE RESOLVE TEXTURE
     // ========================================================
 
     MTL::TextureDescriptor* resolveDescriptor =
@@ -1599,7 +1639,7 @@ void MTLRenderer::createSceneTexture(
     if (!resolveTexture)
     {
         SDL_Log(
-            "Failed to create resolve texture %ux%u",
+            "Failed to create resolve scene texture %ux%u",
             width,
             height
         );
@@ -1608,9 +1648,7 @@ void MTLRenderer::createSceneTexture(
     }
 
     // ========================================================
-    // MSAA TEXTURE
-    //
-    // This is where the scene is actually rasterized.
+    // CREATE MSAA TEXTURE
     // ========================================================
 
     MTL::TextureDescriptor* msaaDescriptor =
@@ -1646,13 +1684,12 @@ void MTLRenderer::createSceneTexture(
     if (!msaaTexture)
     {
         SDL_Log(
-            "Failed to create MSAA texture %ux%u",
+            "Failed to create MSAA scene texture %ux%u",
             width,
             height
         );
 
         resolveTexture->release();
-
         return;
     }
 
@@ -1677,65 +1714,52 @@ void MTLRenderer::createSceneTexture(
     m_SceneMSAATexture = msaaTexture;
     m_SceneTexture = resolveTexture;
 
-    // ========================================================
-    // VIEWPORT
-    // ========================================================
-
-    m_ViewportSize =
-        simd_make_uint2(
-            width,
-            height
-        );
-
-    // ========================================================
-    // PROJECTION
-    // ========================================================
-
-    const float aspect =
-        static_cast<float>(width) /
-        static_cast<float>(height);
-
-    m_Projection =
-        glm::perspective(
-            glm::radians(60.0f),
-            aspect,
-            0.1f,
-            100.0f
-        );
-
-    m_View =
-        glm::translate(
-            glm::mat4(1.0f),
-            glm::vec3(
-                0.0f,
-                0.0f,
-                -5.0f
-            )
-        );
-
     SDL_Log(
-        "Created MSAA scene: %ux%u samples=%u",
+        "Created scene textures: %ux%u",
         width,
-        height,
-        sampleCount
+        height
     );
 }
 void MTLRenderer::destroySceneTexture()
 {
-    if (!m_SceneTexture)
-        return;
+    // ========================================================
+    // REMOVE FROM RESIDENCY
+    // ========================================================
 
     if (m_ResidencySet)
     {
-        m_ResidencySet->removeAllocation(
-            m_SceneTexture
-        );
+        if (m_SceneMSAATexture)
+        {
+            m_ResidencySet->removeAllocation(
+                m_SceneMSAATexture
+            );
+        }
+
+        if (m_SceneTexture)
+        {
+            m_ResidencySet->removeAllocation(
+                m_SceneTexture
+            );
+        }
 
         m_ResidencySet->commit();
     }
 
-    m_SceneTexture->release();
-    m_SceneTexture = nullptr;
+    // ========================================================
+    // RELEASE
+    // ========================================================
+
+    if (m_SceneMSAATexture)
+    {
+        m_SceneMSAATexture->release();
+        m_SceneMSAATexture = nullptr;
+    }
+
+    if (m_SceneTexture)
+    {
+        m_SceneTexture->release();
+        m_SceneTexture = nullptr;
+    }
 }
 
 ImTextureID MTLRenderer::getImGuiTextureID() const
@@ -1817,13 +1841,14 @@ void MTLRenderer::applyPendingResize()
     if (!m_ResizePending)
         return;
 
-    const uint32_t width  = m_PendingViewportSize.x;
-    const uint32_t height = m_PendingViewportSize.y;
+    const uint32_t width  =
+        m_PendingViewportSize.x;
+
+    const uint32_t height =
+        m_PendingViewportSize.y;
 
     if (width == 0 || height == 0)
         return;
-
-    constexpr uint32_t sampleCount = 4;
 
     // ========================================================
     // WAIT FOR GPU
@@ -1839,157 +1864,37 @@ void MTLRenderer::applyPendingResize()
     }
 
     // ========================================================
-    // CREATE NEW RESOLVE TEXTURE FIRST
-    //
-    // This is the texture ImGui samples.
+    // RECREATE SCENE TEXTURES
+    // ========================================================
+    SDL_Log(
+        "BEFORE RESIZE: Metal allocated = %llu MB",
+        static_cast<unsigned long long>(
+            m_Device->currentAllocatedSize() / (1024 * 1024)
+        )
+    );
+    createSceneTexture(
+        width,
+        height
+    );
+
+    SDL_Log(
+        "AFTER RESIZE: Metal allocated = %llu MB",
+        static_cast<unsigned long long>(
+            m_Device->currentAllocatedSize() / (1024 * 1024)
+        )
+    );
+    // ========================================================
+    // DONE
     // ========================================================
 
-    MTL::TextureDescriptor* resolveDescriptor =
-        MTL::TextureDescriptor::alloc()->init();
+    m_ResizePending = false;
 
-    resolveDescriptor->setTextureType(
-        MTL::TextureType::TextureType2D
+    SDL_Log(
+        "Scene resized successfully: %ux%u",
+        width,
+        height
     );
-
-    resolveDescriptor->setPixelFormat(
-        MTL::PixelFormat::PixelFormatBGRA8Unorm_sRGB
-    );
-
-    resolveDescriptor->setWidth(width);
-    resolveDescriptor->setHeight(height);
-
-    resolveDescriptor->setMipmapLevelCount(1);
-    resolveDescriptor->setSampleCount(1);
-
-    resolveDescriptor->setUsage(
-        MTL::TextureUsageRenderTarget |
-        MTL::TextureUsageShaderRead
-    );
-
-    resolveDescriptor->setStorageMode(
-        MTL::StorageMode::StorageModePrivate
-    );
-
-    MTL::Texture* newResolveTexture =
-        m_Device->newTexture(resolveDescriptor);
-
-    resolveDescriptor->release();
-
-    if (!newResolveTexture)
-    {
-        SDL_Log(
-            "Failed to create resolve scene texture %ux%u",
-            width,
-            height
-        );
-
-        return;
-    }
-
-    // ========================================================
-    // CREATE NEW MSAA TEXTURE
-    //
-    // This is the actual render target.
-    // ========================================================
-
-    MTL::TextureDescriptor* msaaDescriptor =
-        MTL::TextureDescriptor::alloc()->init();
-
-    msaaDescriptor->setTextureType(
-        MTL::TextureType::TextureType2DMultisample
-    );
-
-    msaaDescriptor->setPixelFormat(
-        MTL::PixelFormat::PixelFormatBGRA8Unorm_sRGB
-    );
-
-    msaaDescriptor->setWidth(width);
-    msaaDescriptor->setHeight(height);
-
-    msaaDescriptor->setMipmapLevelCount(1);
-    msaaDescriptor->setSampleCount(sampleCount);
-
-    msaaDescriptor->setUsage(
-        MTL::TextureUsageRenderTarget
-    );
-
-    msaaDescriptor->setStorageMode(
-        MTL::StorageMode::StorageModePrivate
-    );
-
-    MTL::Texture* newMSAATexture =
-        m_Device->newTexture(msaaDescriptor);
-
-    msaaDescriptor->release();
-
-    if (!newMSAATexture)
-    {
-        SDL_Log(
-            "Failed to create MSAA scene texture %ux%u",
-            width,
-            height
-        );
-
-        newResolveTexture->release();
-
-        return;
-    }
-
-    // ========================================================
-    // RESIDENCY
-    //
-    // Remove old resources and add new resources together.
-    // ========================================================
-
-    if (m_SceneMSAATexture)
-    {
-        m_ResidencySet->removeAllocation(
-            m_SceneMSAATexture
-        );
-    }
-
-    if (m_SceneTexture)
-    {
-        m_ResidencySet->removeAllocation(
-            m_SceneTexture
-        );
-    }
-
-    m_ResidencySet->addAllocation(
-        newMSAATexture
-    );
-
-    m_ResidencySet->addAllocation(
-        newResolveTexture
-    );
-
-    m_ResidencySet->commit();
-
-    // ========================================================
-    // RELEASE OLD TEXTURES
-    //
-    // GPU is idle, so these are no longer in use.
-    // ========================================================
-
-    if (m_SceneMSAATexture)
-    {
-        m_SceneMSAATexture->release();
-        m_SceneMSAATexture = nullptr;
-    }
-
-    if (m_SceneTexture)
-    {
-        m_SceneTexture->release();
-        m_SceneTexture = nullptr;
-    }
-
-    // ========================================================
-    // PUBLISH NEW TEXTURES
-    // ========================================================
-
-    m_SceneMSAATexture = newMSAATexture;
-    m_SceneTexture     = newResolveTexture;
-
+    
     // ========================================================
     // UPDATE VIEWPORT
     // ========================================================
@@ -2025,19 +1930,6 @@ void MTLRenderer::applyPendingResize()
                 -5.0f
             )
         );
-
-    // ========================================================
-    // DONE
-    // ========================================================
-
-    m_ResizePending = false;
-
-    SDL_Log(
-        "Scene resized successfully: %ux%u MSAA=%ux",
-        width,
-        height,
-        sampleCount
-    );
 }
 // ============================================================
 // Shared event
@@ -2582,10 +2474,7 @@ void MTLRenderer::draw()
     // IMGUI NEW FRAME
     // ========================================================
 
-    ImGui_ImplMetal4_NewFrame(
-            imguiPass,
-        frameIndex
-    );
+    ImGui_ImplMetal4_NewFrame();
 
     ImGui_ImplSDL3_NewFrame();
 
@@ -2693,16 +2582,7 @@ void MTLRenderer::draw()
     // ========================================================
 
     ImGui_ImplMetal4_RenderDrawData(
-        drawData,
-
-        
-                m_CommandBuffer
-            ,
-
-      
-                imguiEncoder
-            
-    );
+        drawData, m_CommandBuffer,imguiEncoder, imguiPass, frameIndex);
 
 
     // ========================================================
