@@ -113,7 +113,7 @@ private:
     // ========================================================
     // Offscreen scene texture
     // ========================================================
-
+    MTL::Texture* m_SceneMSAATexture = nullptr;
     MTL::Texture* m_SceneTexture = nullptr;
 
     void createSceneTexture(
