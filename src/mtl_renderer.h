@@ -40,6 +40,7 @@ public:
     void buildArgumentTable();
 
     void buildShaders();
+    void buildDepthStencilState();
 
     void buildTextureHeap();
     uint32_t buildTexture(const char* path);
@@ -115,6 +116,8 @@ private:
     // ========================================================
     MTL::Texture* m_SceneMSAATexture = nullptr;
     MTL::Texture* m_SceneTexture = nullptr;
+    MTL::Texture* m_SceneDepthTexture = nullptr;
+    MTL::DepthStencilState* m_DepthStencilState = nullptr;
 
     void createSceneTexture(
         uint32_t width,

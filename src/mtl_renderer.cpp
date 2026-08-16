@@ -250,6 +250,8 @@ MTLRenderer::MTLRenderer(SDL_Window& window)
     // --------------------------------------------------------
 
     buildShaders();
+    
+    buildDepthStencilState();
 
 
     // --------------------------------------------------------
@@ -937,6 +939,7 @@ void MTLRenderer::buildShaders()
     
     pipelineDescriptor->setRasterSampleCount(4);
 
+
     // ========================================================
     // COLOR ATTACHMENT
     // ========================================================
@@ -1012,6 +1015,29 @@ void MTLRenderer::buildShaders()
         "MTL4 mesh pipeline created successfully"
     );
 }
+
+void MTLRenderer::buildDepthStencilState()
+{
+    MTL::DepthStencilDescriptor* descriptor =
+        MTL::DepthStencilDescriptor::alloc()->init();
+
+    descriptor->setDepthCompareFunction(
+        MTL::CompareFunction::CompareFunctionLess
+    );
+
+    descriptor->setDepthWriteEnabled(true);
+
+    m_DepthStencilState =
+        m_Device->newDepthStencilState(descriptor);
+
+    descriptor->release();
+
+    if (!m_DepthStencilState)
+    {
+        SDL_Log("Failed to create depth stencil state");
+    }
+}
+
 // ============================================================
 // Texture heap
 // ============================================================
@@ -1440,7 +1466,8 @@ void MTLRenderer::buildSampler()
                 ::alloc()
                 ->init();
 
-
+    descriptor->setSupportArgumentBuffers(true);
+    
     descriptor->setMinFilter(
         MTL::SamplerMinMagFilter::SamplerMinMagFilterLinear
     );
@@ -1692,6 +1719,49 @@ void MTLRenderer::createSceneTexture(
         resolveTexture->release();
         return;
     }
+    
+    MTL::TextureDescriptor* depthDescriptor =
+        MTL::TextureDescriptor::alloc()->init();
+
+    depthDescriptor->setTextureType(
+        MTL::TextureType::TextureType2DMultisample
+    );
+
+    depthDescriptor->setPixelFormat(
+        MTL::PixelFormat::PixelFormatDepth32Float
+    );
+
+    depthDescriptor->setWidth(width);
+    depthDescriptor->setHeight(height);
+
+    depthDescriptor->setMipmapLevelCount(1);
+    depthDescriptor->setSampleCount(sampleCount);
+
+    depthDescriptor->setUsage(
+        MTL::TextureUsageRenderTarget
+    );
+
+    depthDescriptor->setStorageMode(
+        MTL::StorageMode::StorageModePrivate
+    );
+
+    MTL::Texture* depthTexture =
+        m_Device->newTexture(depthDescriptor);
+
+    depthDescriptor->release();
+
+    if (!depthTexture)
+    {
+        SDL_Log(
+            "Failed to create depth texture %ux%u",
+            width,
+            height
+        );
+
+        msaaTexture->release();
+        resolveTexture->release();
+        return;
+    }
 
     // ========================================================
     // RESIDENCY
@@ -1704,6 +1774,8 @@ void MTLRenderer::createSceneTexture(
     m_ResidencySet->addAllocation(
         resolveTexture
     );
+    
+    m_ResidencySet->addAllocation(depthTexture);
 
     m_ResidencySet->commit();
 
@@ -1713,6 +1785,7 @@ void MTLRenderer::createSceneTexture(
 
     m_SceneMSAATexture = msaaTexture;
     m_SceneTexture = resolveTexture;
+    m_SceneDepthTexture = depthTexture;
 
     SDL_Log(
         "Created scene textures: %ux%u",
@@ -1741,6 +1814,13 @@ void MTLRenderer::destroySceneTexture()
                 m_SceneTexture
             );
         }
+        
+        if (m_SceneDepthTexture)
+        {
+            m_ResidencySet->removeAllocation(
+                m_SceneDepthTexture
+            );
+        }
 
         m_ResidencySet->commit();
     }
@@ -1759,6 +1839,12 @@ void MTLRenderer::destroySceneTexture()
     {
         m_SceneTexture->release();
         m_SceneTexture = nullptr;
+    }
+    
+    if (m_SceneDepthTexture)
+    {
+        m_SceneDepthTexture->release();
+        m_SceneDepthTexture = nullptr;
     }
 }
 
@@ -2349,6 +2435,25 @@ void MTLRenderer::draw()
             1.0
         )
     );
+    
+    auto* sceneDepth =
+        scenePass->depthAttachment();
+
+    sceneDepth->setTexture(
+        m_SceneDepthTexture
+    );
+
+    sceneDepth->setLoadAction(
+        MTL::LoadAction::LoadActionClear
+    );
+
+    sceneDepth->setStoreAction(
+        MTL::StoreAction::StoreActionStore
+    );
+
+    sceneDepth->setClearDepth(
+        1.0
+    );
 
 
     MTL4::RenderCommandEncoder*
@@ -2375,6 +2480,9 @@ void MTLRenderer::draw()
         m_RenderPipelineState
     );
 
+    sceneEncoder->setDepthStencilState(
+        m_DepthStencilState
+    );
 
     // --------------------------------------------------------
     // Scene viewport
